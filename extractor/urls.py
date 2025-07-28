@@ -1,6 +1,8 @@
+# extractor/urls.py
 from django.urls import path
-from .views import upload_pdf
+from . import views
 
 urlpatterns = [
-    path("", upload_pdf, name="upload_pdf"),
+    path("", views.upload_pdf, name="upload_pdf"),
+    path("api/extract/", views.extract_pdf_data, name="extract_pdf_api"),  
 ]

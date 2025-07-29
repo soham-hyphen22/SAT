@@ -1507,3 +1507,146 @@ Watching for file changes with StatReloader
 Watching for file changes with StatReloader
 D:\code playground\Richline\Richline\MIS\dataextract\extractor\extractor.py changed, reloading.
 Watching for file changes with StatReloader
+"GET / HTTP/1.1" 200 1485
+Not Found: /favicon.ico
+"GET /favicon.ico HTTP/1.1" 404 2465
+"POST / HTTP/1.1" 200 64404
+D:\code playground\Richline\Richline\MIS\dataextract\extractor\urls.py changed, reloading.
+Watching for file changes with StatReloader
+Watching for file changes with StatReloader
+"GET / HTTP/1.1" 200 1551
+Not Found: /favicon.ico
+"GET /favicon.ico HTTP/1.1" 404 2734
+"GET / HTTP/1.1" 200 1551
+Not Found: /favicon.ico
+"GET /favicon.ico HTTP/1.1" 404 2734
+"POST / HTTP/1.1" 200 64470
+Watching for file changes with StatReloader
+"GET / HTTP/1.1" 200 1551
+Not Found: /favicon.ico
+"GET /favicon.ico HTTP/1.1" 404 2734
+"POST / HTTP/1.1" 200 64470
+"GET / HTTP/1.1" 200 1551
+"POST / HTTP/1.1" 200 64470
+"POST / HTTP/1.1" 200 16015
+Watching for file changes with StatReloader
+"GET / HTTP/1.1" 200 1551
+Not Found: /favicon.ico
+"GET /favicon.ico HTTP/1.1" 404 2734
+"POST / HTTP/1.1" 200 64470
+Watching for file changes with StatReloader
+D:\code playground\Richline\Richline\MIS\dataextract\extractor\views.py changed, reloading.
+Watching for file changes with StatReloader
+Watching for file changes with StatReloader
+Watching for file changes with StatReloader
+Watching for file changes with StatReloader
+Watching for file changes with StatReloader
+Watching for file changes with StatReloader
+Watching for file changes with StatReloader
+Watching for file changes with StatReloader
+Watching for file changes with StatReloader
+Watching for file changes with StatReloader
+Watching for file changes with StatReloader
+Watching for file changes with StatReloader
+Watching for file changes with StatReloader
+Watching for file changes with StatReloader
+Watching for file changes with StatReloader
+Watching for file changes with StatReloader
+Watching for file changes with StatReloader
+Watching for file changes with StatReloader
+Watching for file changes with StatReloader
+Watching for file changes with StatReloader
+Watching for file changes with StatReloader
+Watching for file changes with StatReloader
+Watching for file changes with StatReloader
+Watching for file changes with StatReloader
+D:\code playground\Richline\Richline\MIS\dataextract\extractor\views.py changed, reloading.
+Watching for file changes with StatReloader
+D:\code playground\Richline\Richline\MIS\dataextract\dataextract\urls.py changed, reloading.
+Watching for file changes with StatReloader
+D:\code playground\Richline\Richline\MIS\dataextract\extractor\urls.py changed, reloading.
+Watching for file changes with StatReloader
+"GET / HTTP/1.1" 200 1550
+"POST / HTTP/1.1" 200 64469
+D:\code playground\Richline\Richline\MIS\dataextract\extractor\views.py changed, reloading.
+Watching for file changes with StatReloader
+Watching for file changes with StatReloader
+"GET / HTTP/1.1" 200 1550
+"POST / HTTP/1.1" 200 64469
+D:\code playground\Richline\Richline\MIS\dataextract\extractor\extractor.py changed, reloading.
+Watching for file changes with StatReloader
+"GET / HTTP/1.1" 200 1550
+"POST / HTTP/1.1" 200 84371
+D:\code playground\Richline\Richline\MIS\dataextract\extractor\extractor.py changed, reloading.
+Watching for file changes with StatReloader
+"GET / HTTP/1.1" 200 1550
+"POST / HTTP/1.1" 200 91127
+D:\code playground\Richline\Richline\MIS\dataextract\extractor\extractor.py changed, reloading.
+Watching for file changes with StatReloader
+"GET / HTTP/1.1" 200 1550
+"GET / HTTP/1.1" 200 1550
+"POST / HTTP/1.1" 200 91127
+D:\code playground\Richline\Richline\MIS\dataextract\extractor\extractor.py changed, reloading.
+Watching for file changes with StatReloader
+"GET / HTTP/1.1" 200 1550
+"POST / HTTP/1.1" 200 84178
+D:\code playground\Richline\Richline\MIS\dataextract\extractor\extractor.py changed, reloading.
+Watching for file changes with StatReloader
+"GET / HTTP/1.1" 200 1550
+"POST / HTTP/1.1" 200 83596
+D:\code playground\Richline\Richline\MIS\dataextract\extractor\extractor.py changed, reloading.
+Watching for file changes with StatReloader
+D:\code playground\Richline\Richline\MIS\dataextract\extractor\extractor.py changed, reloading.
+"GET / HTTP/1.1" 200 1550
+"GET / HTTP/1.1" 200 1550
+"GET / HTTP/1.1" 200 1550
+Watching for file changes with StatReloader
+Watching for file changes with StatReloader
+"GET / HTTP/1.1" 200 1550
+"POST / HTTP/1.1" 200 83596
+Watching for file changes with StatReloader
+"GET / HTTP/1.1" 200 1550
+"POST / HTTP/1.1" 200 83596
+D:\code playground\Richline\Richline\MIS\dataextract\extractor\extractor.py changed, reloading.
+Watching for file changes with StatReloader
+"GET / HTTP/1.1" 200 1550
+"POST / HTTP/1.1" 200 83596
+"POST / HTTP/1.1" 200 21053
+Watching for file changes with StatReloader
+"GET / HTTP/1.1" 200 1550
+"POST / HTTP/1.1" 200 83596
+Watching for file changes with StatReloader
+"GET / HTTP/1.1" 200 1550
+"POST / HTTP/1.1" 200 84289
+Watching for file changes with StatReloader
+"GET / HTTP/1.1" 200 1550
+"POST / HTTP/1.1" 200 84289
+Watching for file changes with StatReloader
+"GET / HTTP/1.1" 200 1550
+"POST / HTTP/1.1" 200 84289
+D:\code playground\Richline\Richline\MIS\dataextract\extractor\extractor.py changed, reloading.
+Watching for file changes with StatReloader
+D:\code playground\Richline\Richline\MIS\dataextract\extractor\extractor.py changed, reloading.
+Watching for file changes with StatReloader
+D:\code playground\Richline\Richline\MIS\dataextract\extractor\extractor.py changed, reloading.
+Watching for file changes with StatReloader
+D:\code playground\Richline\Richline\MIS\dataextract\extractor\extractor.py changed, reloading.
+Watching for file changes with StatReloader
+D:\code playground\Richline\Richline\MIS\dataextract\extractor\extractor.py changed, reloading.
+Watching for file changes with StatReloader
+D:\code playground\Richline\Richline\MIS\dataextract\extractor\extractor.py changed, reloading.
+Watching for file changes with StatReloader
+Watching for file changes with StatReloader
+"GET / HTTP/1.1" 200 1550
+"POST / HTTP/1.1" 200 3306
+D:\code playground\Richline\Richline\MIS\dataextract\extractor\extractor.py changed, reloading.
+Watching for file changes with StatReloader
+D:\code playground\Richline\Richline\MIS\dataextract\extractor\extractor.py changed, reloading.
+Watching for file changes with StatReloader
+Watching for file changes with StatReloader
+Watching for file changes with StatReloader
+"GET / HTTP/1.1" 200 1550
+"GET / HTTP/1.1" 200 1550
+"POST / HTTP/1.1" 200 3306
+D:\code playground\Richline\Richline\MIS\dataextract\extractor\extractor.py changed, reloading.
+Watching for file changes with StatReloader

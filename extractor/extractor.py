@@ -189,29 +189,38 @@ class PDFOCRExtractor:
         """Enhanced item extraction with better table parsing"""
         items = []
         
-        # Find table boundaries
-        table_started = False
-        item_rows = []
+        # Find all item numbers first - ENHANCED PATTERNS
+        item_patterns = [
+            r'\*\*([A-Z]{2}\d{4}[A-Z0-9]+)\*\*',  # Bold item numbers
+            r'\b([A-Z]{2}\d{4}[A-Z0-9]+)\b(?=\s+[A-Z]{2}\d{3,6})',  # Item with vendor style
+            r'^\s*([A-Z]{2}\d{4}[A-Z0-9]+)\s+',
+            r'^\s*([0-9]{5,}[A-Z]{2}[A-Z0-9]*)\s+',  # Line starting with item number
+        ]
         
+        item_locations = []
         for i, line in enumerate(lines):
-            # Detect table header
-            if "Item No." in line and "Description" in line:
-                table_started = True
-                continue
-            
-            if table_started:
-                # Look for item number patterns (Richline Item #) - FIXED to handle O vs 0
-                item_match = re.search(r'\b([A-Z]{2}\d{4}[A-Z0-9]+)\b', line)
-                if item_match:
-                    item_number = item_match.group(1)
+            for pattern in item_patterns:
+                matches = re.finditer(pattern, line)
+                for match in matches:
+                    item_number = match.group(1)
                     # Fix O to 0 in item numbers
-                    item_number = item_number.replace('O', '0')
-                    item_rows.append((i, item_number, line))
+                    item_number = item_number.replace('O', '0').replace('B', '8')
+                    item_locations.append((i, item_number, line))
+        
+        # Remove duplicates and sort by line number
+        seen_items = set()
+        unique_items = []
+        for loc in item_locations:
+            if loc[1] not in seen_items:
+                seen_items.add(loc[1])
+                unique_items.append(loc)
+        
+        unique_items.sort(key=lambda x: x[0])
         
         # Process each item
-        for idx, (line_idx, item_number, item_line) in enumerate(item_rows):
+        for idx, (line_idx, item_number, item_line) in enumerate(unique_items):
             # Determine item boundary
-            next_item_idx = item_rows[idx + 1][0] if idx + 1 < len(item_rows) else len(lines)
+            next_item_idx = unique_items[idx + 1][0] if idx + 1 < len(unique_items) else len(lines)
             
             item = self.extract_single_item_enhanced(
                 item_number, 
@@ -226,9 +235,88 @@ class PDFOCRExtractor:
         
         return items
 
+    def extract_vendor_item_from_ocr(self, item_line, item_text):
+        """Extract vendor item number based on OCR structure"""
+        
+        # Pattern 1: Item number followed by vendor style on same line
+        vendor_pattern1 = r'[A-Z]{2}\d{4}[A-Z0-9]+\s+([A-Z]{2}\d{3,6}[A-Z0-9]*)'
+        match = re.search(vendor_pattern1, item_line)
+        if match:
+            return match.group(1)
+        
+        # Pattern 2: Look for vendor style in item context
+        vendor_patterns = [
+            r'Vendor Style[:\s]*([A-Z]{2}\d{3,6}[A-Z0-9]*)',
+            r'\b([A-Z]{2}\d{3,6}[A-Z0-9]*)\b(?=\s+\d+\.\d+\s+[A-Z]+)',
+            r'Style[:\s]*([A-Z]{2}\d{3,6}[A-Z0-9]*)'
+        ]
+        
+        for pattern in vendor_patterns:
+            match = re.search(pattern, item_text)
+            if match:
+                return match.group(1)
+        
+        return None
+
+    def extract_size_from_description(self, description):
+        """Extract size from metal description"""
+        if not description:
+            return None
+            
+        # Size patterns from actual OCR data
+        size_patterns = [
+            r'^(\d+\.\d+)\s+',  # "7.00 10KY BAND..."
+            r'^(\d+)\s+',       # "18 10KW PEN..."
+            r'(\d+\.\d+)(?:\s+[A-Z]+)',  # Size followed by metal
+        ]
+        
+        for pattern in size_patterns:
+            match = re.search(pattern, description)
+            if match:
+                return f"SIZE {match.group(1)}"
+        
+        return None
+
+    def extract_metal_from_description(self, description):
+        """Extract metal information from description"""
+        if not description:
+            return None, None
+            
+        # Enhanced metal patterns based on OCR data
+        bimetal_patterns = [
+            r'\b(SS)/(10K[YWR])\b',  # SS/10KY
+            r'\b(10K[YWR])/(SS)\b',  # 10KY/SS  
+            r'\b(SILVER)/(GOLD)\b',
+            r'\b(GOLD)/(SILVER)\b'
+        ]
+        
+        # Check for bimetal first
+        for pattern in bimetal_patterns:
+            match = re.search(pattern, description.upper())
+            if match:
+                                return match.group(1), match.group(2)
+        
+        # Single metal patterns
+        single_metal_patterns = [
+            r'\b(10K[YWR])\b',
+            r'\b(14K[YWR])\b', 
+            r'\b(18K[YWR])\b',
+            r'\b(SS)\b',
+            r'\b(GOS)\b',  # Gold over Silver
+            r'\b(SILVER)\b',
+            r'\b(GOLD)\b'
+        ]
+        
+        for pattern in single_metal_patterns:
+            match = re.search(pattern, description.upper())
+            if match:
+                return match.group(1), None
+        
+        return None, None
+
     def extract_single_item_enhanced(self, item_number, item_line, item_lines, global_start_idx, all_lines):
         """Extract single item with all required fields"""
-        item = {"Components": [], "CAST Fin WT": {}, "LOSS %": {}}
+        item = {"Components": [], "CAST Fin WT": {}, "LOSS %": {},  "Richline Item #": item_number}
         
         # Set Richline Item #
         item["Richline Item #"] = item_number
@@ -236,8 +324,42 @@ class PDFOCRExtractor:
         # Get full item text for pattern matching
         item_text = "\n".join(item_lines)
         
-        # Parse the main item line for basic data
+        # Parse the main item line for basic data - ENHANCED
         self.parse_item_table_row(item, item_line)
+        
+        # Extract vendor item number - ENHANCED
+        vendor_item = self.extract_vendor_item_from_ocr(item_line, item_text)
+        if vendor_item and vendor_item != item_number:
+            if item_number.startswith(vendor_item):
+                item["Vendor Item #"] = vendor_item
+            elif len(vendor_item) <= 12:
+                item["Vendor Item #"] = vendor_item
+
+        size_match = re.search(r'\b(\d{1,2}\.\d{2})\b', item_text)
+        if size_match:
+            item["Size"] = f"SIZE {size_match.group(1)}"
+
+        metal_match = re.findall(r'\b(10K[YWR]|14K[YWR]|18K[YWR]|SS|GOS|SILVER|GOLD)\b', item_text.upper())
+        if metal_match:
+            item["Metal 1"] = metal_match[0]
+            if len(metal_match) > 1:
+                item["Metal 2"] = metal_match[1]
+
+        job_match = re.search(r'\b(RSET\d{6}|RFP\d{6})\b', item_text)
+        if job_match:
+            item["Job #"] = job_match.group(1)
+
+        # Extract size from description - NEW
+        size = self.extract_size_from_description(item.get("Metal Description", ""))
+        if size:
+            item["Size"] = size
+        
+        # Extract metal information from description - ENHANCED
+        metal1, metal2 = self.extract_metal_from_description(item.get("Metal Description", ""))
+        if metal1:
+            item["Metal 1"] = metal1
+        if metal2:
+            item["Metal 2"] = metal2
         
         # Extract Job # - ENHANCED to find job numbers for each item more accurately
         job_patterns = [r"(RFP\d{6,})", r"(RSET\d{6,})"]
@@ -271,33 +393,33 @@ class PDFOCRExtractor:
                     item["Job #"] = matches[0][0]
                     break
 
-        # Extract Vendor Item # - Look for vendor item codes
-        vendor_patterns = [
-            r'Vendor Style[:\s]*([A-Z]{2}\d{3,6}[A-Z0-9-]*)',
-            r'\b([A-Z]{2}\d{3,6}[A-Z0-9-]*)\b(?!\s*\d+\.\d+)',
-            r'Style[:\s]*([A-Z]{2}\d{3,6}[A-Z0-9-]*)'
-        ]
-        
-        # Look in the item line for vendor item patterns
-        vendor_item_line_pattern = r'[A-Z]{2}\d{4}[A-Z0-9]+\s+([A-Z]{2}\d{3,6}[A-Z0-9-]*)'
-        vendor_match = re.search(vendor_item_line_pattern, item_line)
-        if vendor_match:
-            vendor_item = vendor_match.group(1)
-            if vendor_item != item_number:
-                item["Vendor Item #"] = vendor_item
-        
-        # If not found in item line, look in item text
+        # If still no vendor item found, use fallback method
         if "Vendor Item #" not in item:
-            for pattern in vendor_patterns:
-                matches = re.findall(pattern, item_text)
-                for match in matches:
-                    if match != item_number:
-                        item["Vendor Item #"] = match
+            # Look in the item line for vendor item patterns
+            vendor_item_line_pattern = r'[A-Z]{2}\d{4}[A-Z0-9]+\s+([A-Z]{2}\d{3,6}[A-Z0-9-]*)'
+            vendor_match = re.search(vendor_item_line_pattern, item_line)
+            if vendor_match:
+                vendor_item = vendor_match.group(1)
+                if vendor_item != item_number:
+                    item["Vendor Item #"] = vendor_item
+            
+            # If not found in item line, look in item text
+            if "Vendor Item #" not in item:
+                vendor_patterns = [
+                    r'Vendor Style[:\s]*([A-Z]{2}\d{3,6}[A-Z0-9-]*)',
+                    r'\b([A-Z]{2}\d{3,6}[A-Z0-9-]*)\b(?!\s*\d+\.\d+)',
+                    r'Style[:\s]*([A-Z]{2}\d{3,6}[A-Z0-9-]*)'
+                ]
+                for pattern in vendor_patterns:
+                    matches = re.findall(pattern, item_text)
+                    for match in matches:
+                        if match != item_number:
+                            item["Vendor Item #"] = match
+                            break
+                    if "Vendor Item #" in item:
                         break
-                if "Vendor Item #" in item:
-                    break
 
-                # Extract detailed fields
+        # Extract detailed fields
         self.extract_item_financial_data(item, item_text)
         self.extract_item_technical_data(item, item_text)
         self.extract_item_physical_data(item, item_text)
@@ -308,22 +430,48 @@ class PDFOCRExtractor:
         return item
 
     def parse_item_table_row(self, item, item_line):
-        """Parse the main table row for basic item data"""
+        """Enhanced item table row parsing based on actual OCR structure"""
         
-        # Extract description (between item number and first price)
-        desc_pattern = r'[A-Z]{2}\d{4}[A-Z0-9]+\s+([^0-9]+?)(?=\s+\d+\.\d+)'
-        desc_match = re.search(desc_pattern, item_line)
-        if desc_match:
-            description = desc_match.group(1).strip()
-            description = re.sub(r'\s+', ' ', description)
-            item["Metal Description"] = description
+        # Extract description - ENHANCED patterns based on actual OCR format
+        desc_patterns = [
+            # Pattern: SIZE METAL DESCRIPTION
+            r'[A-Z]{2}\d{4}[A-Z0-9]+\s+([0-9.]+\s+[A-Z/]+\s+[^|]+?)(?=\s+[\d.]+\s+\d+\s+EA)',
+            # Fallback pattern
+            r'[A-Z]{2}\d{4}[A-Z0-9]+\s+(.+?)(?=\s+[\d.]+\s+\d+\s+(?:EA|PR))',
+            # Another fallback
+            r'[A-Z]{2}\d{4}[A-Z0-9]+\s+(.+?)(?=\s+[\d.]+)',
+            # Original pattern as fallback
+            r'[A-Z]{2}\d{4}[A-Z0-9]+\s+([^0-9]+?)(?=\s+\d+\.\d+)'
+        ]
+        
+        for pattern in desc_patterns:
+            desc_match = re.search(pattern, item_line)
+            if desc_match:
+                description = desc_match.group(1).strip()
+                # Clean up the description
+                description = re.sub(r'\s+', ' ', description)
+                description = re.sub(r'\s*\|\s*', ' ', description)  # Remove table separators
+                if len(description) > 5:  # Ensure meaningful description
+                    item["Metal Description"] = description
+                    break
 
-        # Extract Pieces/Carats and Ext. Gross Wt. based on EA position
-        ea_pattern = r'(\d+)\s+(EA|PR)\s+(\d+\.\d+)'
-        ea_match = re.search(ea_pattern, item_line)
-        if ea_match:
-            item["Pieces/Carats"] = ea_match.group(1)
-            item["Ext. Gross Wt."] = f"{ea_match.group(3)} GR"
+        # Extract Pieces/Carats and Ext. Gross Wt. - ENHANCED for actual format
+        # Pattern: ITEM_NUMBER DESCRIPTION UNIT_COST PIECES UOM EXT_GROSS_WT EXT_COST
+        table_patterns = [
+            r'[A-Z]{2}\d{4}[A-Z0-9]+\s+.+?\s+([\d.]+)\s+(\d+)\s+(EA|PR)\s+([\d.]+)',
+            r'(\d+)\s+(EA|PR)\s+(\d+\.\d+)',  # Original pattern as fallback
+        ]
+        
+        for pattern in table_patterns:
+            table_match = re.search(pattern, item_line)
+            if table_match:
+                if len(table_match.groups()) == 4:  # First pattern
+                    item["Pieces/Carats"] = table_match.group(2)
+                    item["Ext. Gross Wt."] = f"{table_match.group(4)} GR"
+                elif len(table_match.groups()) == 3:  # Second pattern
+                    item["Pieces/Carats"] = table_match.group(1)
+                    item["Ext. Gross Wt."] = f"{table_match.group(3)} GR"
+                break
 
     def extract_item_financial_data(self, item, item_text):
         """Extract financial data from item text"""
@@ -374,6 +522,22 @@ class PDFOCRExtractor:
                     item["Fin Weight (Silver)"] = match.group(2)
                 break
         
+        # Enhanced silver weight extraction - NEW
+        if "Silver" not in item["CAST Fin WT"]:
+            silver_patterns = [
+                r'CAST Fin WT[:\s]*.*?Silver[:\s]*(\d+\.\d+)',
+                r'Fin WT[:\s]*.*?Silver[:\s]*(\d+\.\d+)',
+                r'Silver[:\s]*(\d+\.\d+)(?:\s*GR)?',
+                r'CAST.*?Silver[:\s]*(\d+\.\d+)'
+            ]
+            
+            for pattern in silver_patterns:
+                match = re.search(pattern, item_text, re.IGNORECASE)
+                if match:
+                    item["CAST Fin WT"]["Silver"] = match.group(1)
+                    item["Fin Weight (Silver)"] = match.group(1)
+                    break
+        
         # LOSS % - FIXED to extract percentages correctly
         loss_patterns = [
             r'LOSS %[:\s]*Gold[:\s]*(\d+\.\d+)%?(?:\s*Silver[:\s]*(\d+\.\d+)%?)?',
@@ -409,6 +573,7 @@ class PDFOCRExtractor:
                 if match:
                     item["LOSS %"]["Gold"] = f"{match.group(1)}%"
                     item["LOSS %"]["Silver"] = f"{match.group(2)}%"
+        
         # Diamond Details
         diamond_patterns = [
             r'Diamond TW[:\s]*(\d+\.\d+)',
@@ -426,49 +591,51 @@ class PDFOCRExtractor:
 
     def extract_item_physical_data(self, item, item_text):
         """Extract physical characteristics from item text"""
-        
-        # Size
-        size_patterns = [
-            r'SIZE[:\s]+(\d+(?:\.\d+)?)',
-            r'Size[:\s]+(\d+(?:\.\d+)?)',
-            r'(\d+\.\d+)\s+(?:10K|14K|18K|SS|GOS)',
-            r'Size[:\s]*(\d+)'
-        ]
-        
-        for pattern in size_patterns:
-            match = re.search(pattern, item_text, re.IGNORECASE)
-            if match:
-                item["Size"] = f"SIZE {match.group(1)}"
-                break
-        
-        # REMOVED Total Weight extraction as requested
-        
-        # Metal Category - FIXED to properly split metals from description
-        metal_description = item.get("Metal Description", "")
-        
-        # ENHANCED: Look for SS/ patterns specifically and other combinations
-        # Check for SS/ first (SS will always be present in SS/... patterns)
-        combined_metal_pattern =  r'\b(SS|10K[YMWR]|14K[YMWR]|18K[YMWR]|GOLD|SILVER)/(SS|10K[YMWR]|14K[YMWR]|18K[YMWR]|GOLD|SILVER)\b'
-        combined_match  = re.search(combined_metal_pattern, metal_description.upper())
-        
-        if combined_match:
-            item["Metal 1"] = combined_match.group(1)
-            item["Metal 2"] = combined_match.group(2)
-        else:
-            single_metal_patterns = [
-                r'\b(10KM|14KM|18KM|10KY|10KW|14KY|14KW|18KY|18KW|SS|SILVER|GOLD)\b']
-            
-            for pattern in single_metal_patterns:
-                match = re.search(pattern, metal_description.upper())
+
+        # Size - ENHANCED with description extraction
+        if "Size" not in item:  # Only if not already extracted from description
+            size_patterns = [
+                r'SIZE[:\s]+(\d+(?:\.\d+)?)',
+                r'Size[:\s]+(\d+(?:\.\d+)?)',
+                                r'(\d+\.\d+)\s+(?:10K|14K|18K|SS|GOS)',
+                r'Size[:\s]*(\d+)'
+            ]
+
+            for pattern in size_patterns:
+                match = re.search(pattern, item_text, re.IGNORECASE)
                 if match:
-                    item["Metal 1"] = match.group(1)
+                    item["Size"] = f"SIZE {match.group(1)}"
                     break
-            if "Metal 1" not in item:
-               for pattern in single_metal_patterns:
-                   match = re.search(pattern, item_text.upper())
-                   if match:
-                       item["Metal 1"] = match.group(1)
-                       break
+
+        # Metal Category - ENHANCED to properly split metals from description
+        if "Metal 1" not in item:  # Only if not already extracted from description
+            metal_description = item.get("Metal Description", "")
+
+            # ENHANCED: Look for SS/ patterns specifically and other combinations
+            # Check for SS/ first (SS will always be present in SS/... patterns)
+            combined_metal_pattern = r'\b(SS|10K[YMWR]|14K[YMWR]|18K[YMWR]|GOLD|SILVER)/(SS|10K[YMWR]|14K[YMWR]|18K[YMWR]|GOLD|SILVER)\b'
+            combined_match = re.search(combined_metal_pattern, metal_description.upper())
+
+            if combined_match:
+                item["Metal 1"] = combined_match.group(1)
+                item["Metal 2"] = combined_match.group(2)
+            else:
+                single_metal_patterns = [
+                    r'\b(10KM|14KM|18KM|10KY|10KW|14KY|14KW|18KY|18KW|SS|SILVER|GOLD)\b'
+                ]
+
+                for pattern in single_metal_patterns:
+                    match = re.search(pattern, metal_description.upper())
+                    if match:
+                        item["Metal 1"] = match.group(1)
+                        break
+
+                if "Metal 1" not in item:
+                    for pattern in single_metal_patterns:
+                        match = re.search(pattern, item_text.upper())
+                        if match:
+                            item["Metal 1"] = match.group(1)
+                            break
         
     def extract_components_enhanced(self, item_lines, global_start_idx, all_lines):
         """Enhanced component extraction"""
@@ -545,7 +712,7 @@ class PDFOCRExtractor:
         return components
 
     def parse_component_line_enhanced(self, line):
-        """Parse a single component line - FIXED to clean component names properly"""
+        """Parse a single component line - ENHANCED to clean component names properly"""
         component = {
             "Component": "",
             "Cost ($)": "",
@@ -557,6 +724,18 @@ class PDFOCRExtractor:
         if not line or len(line) < 3:
             return None
         
+        # Add validation to prevent malformed component names - NEW
+        skip_patterns = [
+            r'^\s*\|\s*Supplied by\s*\|',
+            r'^\s*Component\s+Cost\s+Weight',
+            r'^\s*Total\s*:',
+            r'^\d+\s+\d+\.\d+\s+CT\s+\d+\.\d+\s+CT.*Send To$'  # Skip malformed lines
+        ]
+        
+        for pattern in skip_patterns:
+            if re.search(pattern, line, re.IGNORECASE):
+                return None
+        
         # Handle table format with | separators
         if "|" in line:
             columns = [col.strip() for col in line.split("|") if col.strip()]
@@ -567,7 +746,7 @@ class PDFOCRExtractor:
         if not columns:
             return None
         
-        # Extract component name - FIXED to get clean component names
+        # Extract component name - ENHANCED to get clean component names
         component_name = ""
         
         # Look for specific component patterns and extract ONLY the component name
@@ -621,7 +800,12 @@ class PDFOCRExtractor:
                             component_name = match.group(1)
                             break
         
+        # Validate component name before proceeding - NEW
         if not component_name:
+            return None
+        
+        # Check if component name looks valid - NEW
+        if re.match(r'^[\d\s\.]+$', component_name):  # Only numbers/spaces/dots
             return None
         
         component["Component"] = component_name
@@ -719,7 +903,7 @@ class PDFOCRExtractor:
             "Richline Item #", "Job #", "Vendor Item #", "Pieces/Carats", "Fin Weight (Gold)", 
             "Fin Weight (Silver)", "Size", "Metal Description", "Diamond Details", 
             "Stone Labor", "Labor PC", "Ext. Gross Wt.", "Metal 1", "Metal 2",
-            "LOSS %"
+            "LOSS %", "Rate", "Total Weight"  # Added new fields
         ]
         
         coverage = {
@@ -774,7 +958,7 @@ class PDFOCRExtractor:
             if not images:
                 return {
                     "error": "Failed to convert PDF to images",
-                    "details": "The PDF may be corrupted, password-protected, or contain non-text content",
+                                        "details": "The PDF may be corrupted, password-protected, or contain non-text content",
                     "debug": debug,
                 }
 

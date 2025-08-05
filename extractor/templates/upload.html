@@ -20,8 +20,15 @@
                 {{ form.pdf_file }}
                 <small style="color: #666;">Max file size: 10MB. Only PDF files are supported.</small>
             </div>
-            <button type="submit">Extract Data</button>
-        </form>
+            <button type="submit" name="action" value="extract">Extract Data</button> </form>
+
+            {% if show_download %}
+            <form method="post">
+                {% csrf_token %}
+                <button type="submit" name="download_excel" value="true"
+                    style="background-color: green; color: white; margin-top: 10px;">Download Excel</button>
+            </form>
+            {%endif %}
 
         {% if error %}
         <div class="error">

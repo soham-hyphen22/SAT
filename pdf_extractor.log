@@ -2180,3 +2180,200 @@ D:\code playground\Richline\Richline\MIS\dataextract\extractor\extractor.py chan
 Watching for file changes with StatReloader
 D:\code playground\Richline\Richline\MIS\dataextract\extractor\extractor.py changed, reloading.
 Watching for file changes with StatReloader
+"POST / HTTP/1.1" 200 588661
+Watching for file changes with StatReloader
+"GET / HTTP/1.1" 200 1550
+Not Found: /favicon.ico
+"GET /favicon.ico HTTP/1.1" 404 2734
+"POST / HTTP/1.1" 200 28847
+"POST / HTTP/1.1" 200 94748
+"POST / HTTP/1.1" 200 3216
+"POST / HTTP/1.1" 200 3216
+"POST / HTTP/1.1" 200 23869
+"POST / HTTP/1.1" 200 34041
+"POST / HTTP/1.1" 200 19319
+"POST / HTTP/1.1" 200 27541
+"POST / HTTP/1.1" 200 27541
+Not Found: /favicon.ico
+"GET /favicon.ico HTTP/1.1" 404 2734
+D:\code playground\Richline\Richline\MIS\dataextract\extractor\extractor.py changed, reloading.
+Watching for file changes with StatReloader
+D:\code playground\Richline\Richline\MIS\dataextract\extractor\extractor.py changed, reloading.
+Watching for file changes with StatReloader
+"POST / HTTP/1.1" 200 587847
+"POST / HTTP/1.1" 200 587847
+D:\code playground\Richline\Richline\MIS\dataextract\extractor\extractor.py changed, reloading.
+Watching for file changes with StatReloader
+"POST / HTTP/1.1" 200 583595
+D:\code playground\Richline\Richline\MIS\dataextract\extractor\extractor.py changed, reloading.
+Watching for file changes with StatReloader
+"POST / HTTP/1.1" 200 4335
+"POST / HTTP/1.1" 200 4335
+D:\code playground\Richline\Richline\MIS\dataextract\extractor\extractor.py changed, reloading.
+Watching for file changes with StatReloader
+"POST / HTTP/1.1" 200 4394
+D:\code playground\Richline\Richline\MIS\dataextract\extractor\extractor.py changed, reloading.
+Watching for file changes with StatReloader
+"POST / HTTP/1.1" 200 4394
+D:\code playground\Richline\Richline\MIS\dataextract\extractor\extractor.py changed, reloading.
+Watching for file changes with StatReloader
+"POST / HTTP/1.1" 200 4394
+"POST / HTTP/1.1" 200 4394
+"POST / HTTP/1.1" 200 4394
+D:\code playground\Richline\Richline\MIS\dataextract\extractor\extractor.py changed, reloading.
+Watching for file changes with StatReloader
+D:\code playground\Richline\Richline\MIS\dataextract\extractor\extractor.py changed, reloading.
+Watching for file changes with StatReloader
+"POST / HTTP/1.1" 200 4394
+D:\code playground\Richline\Richline\MIS\dataextract\extractor\extractor.py changed, reloading.
+Watching for file changes with StatReloader
+"POST / HTTP/1.1" 200 4394
+D:\code playground\Richline\Richline\MIS\dataextract\extractor\extractor.py changed, reloading.
+Watching for file changes with StatReloader
+"POST / HTTP/1.1" 200 4465
+D:\code playground\Richline\Richline\MIS\dataextract\extractor\extractor.py changed, reloading.
+Watching for file changes with StatReloader
+"POST / HTTP/1.1" 200 588661
+D:\code playground\Richline\Richline\MIS\dataextract\extractor\extractor.py changed, reloading.
+Watching for file changes with StatReloader
+"POST / HTTP/1.1" 200 582612
+"POST / HTTP/1.1" 200 582612
+D:\code playground\Richline\Richline\MIS\dataextract\extractor\extractor.py changed, reloading.
+Watching for file changes with StatReloader
+"POST / HTTP/1.1" 200 588661
+D:\code playground\Richline\Richline\MIS\dataextract\extractor\extractor.py changed, reloading.
+Watching for file changes with StatReloader
+D:\code playground\Richline\Richline\MIS\dataextract\extractor\extractor.py changed, reloading.
+Watching for file changes with StatReloader
+"POST / HTTP/1.1" 200 588641
+Watching for file changes with StatReloader
+"GET / HTTP/1.1" 200 1550
+"GET / HTTP/1.1" 200 1550
+"POST / HTTP/1.1" 200 94748
+"POST / HTTP/1.1" 200 94872
+- Broken pipe from ('127.0.0.1', 59811)
+"POST / HTTP/1.1" 200 94872
+"POST / HTTP/1.1" 200 94872
+D:\code playground\Richline\Richline\MIS\dataextract\extractor\views.py changed, reloading.
+Watching for file changes with StatReloader
+D:\code playground\Richline\Richline\MIS\dataextract\extractor\views.py changed, reloading.
+Watching for file changes with StatReloader
+D:\code playground\Richline\Richline\MIS\dataextract\extractor\extractor.py changed, reloading.
+Watching for file changes with StatReloader
+D:\code playground\Richline\Richline\MIS\dataextract\extractor\extractor.py changed, reloading.
+Watching for file changes with StatReloader
+D:\code playground\Richline\Richline\MIS\dataextract\extractor\views.py changed, reloading.
+Watching for file changes with StatReloader
+"GET / HTTP/1.1" 200 1674
+Internal Server Error: /
+Traceback (most recent call last):
+  File "D:\code playground\Richline\Richline\MIS\myenv\Lib\site-packages\django\db\backends\utils.py", line 105, in _execute
+    return self.cursor.execute(sql, params)
+           ~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^
+  File "D:\code playground\Richline\Richline\MIS\myenv\Lib\site-packages\django\db\backends\sqlite3\base.py", line 360, in execute
+    return super().execute(query, params)
+           ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^
+sqlite3.OperationalError: no such table: django_session
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "D:\code playground\Richline\Richline\MIS\myenv\Lib\site-packages\django\core\handlers\exception.py", line 55, in inner
+    response = get_response(request)
+  File "D:\code playground\Richline\Richline\MIS\myenv\Lib\site-packages\django\utils\deprecation.py", line 122, in __call__
+    response = self.process_response(request, response)
+  File "D:\code playground\Richline\Richline\MIS\myenv\Lib\site-packages\django\contrib\sessions\middleware.py", line 59, in process_response
+    request.session.save()
+    ~~~~~~~~~~~~~~~~~~~~^^
+  File "D:\code playground\Richline\Richline\MIS\myenv\Lib\site-packages\django\contrib\sessions\backends\db.py", line 121, in save
+    return self.create()
+           ~~~~~~~~~~~^^
+  File "D:\code playground\Richline\Richline\MIS\myenv\Lib\site-packages\django\contrib\sessions\backends\db.py", line 70, in create
+    self._session_key = self._get_new_session_key()
+                        ~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "D:\code playground\Richline\Richline\MIS\myenv\Lib\site-packages\django\contrib\sessions\backends\base.py", line 196, in _get_new_session_key
+    if not self.exists(session_key):
+           ~~~~~~~~~~~^^^^^^^^^^^^^
+  File "D:\code playground\Richline\Richline\MIS\myenv\Lib\site-packages\django\contrib\sessions\backends\db.py", line 63, in exists
+    return self.model.objects.filter(session_key=session_key).exists()
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "D:\code playground\Richline\Richline\MIS\myenv\Lib\site-packages\django\db\models\query.py", line 1296, in exists
+    return self.query.has_results(using=self.db)
+           ~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^
+  File "D:\code playground\Richline\Richline\MIS\myenv\Lib\site-packages\django\db\models\sql\query.py", line 674, in has_results
+    return compiler.has_results()
+           ~~~~~~~~~~~~~~~~~~~~^^
+  File "D:\code playground\Richline\Richline\MIS\myenv\Lib\site-packages\django\db\models\sql\compiler.py", line 1591, in has_results
+    return bool(self.execute_sql(SINGLE))
+                ~~~~~~~~~~~~~~~~^^^^^^^^
+  File "D:\code playground\Richline\Richline\MIS\myenv\Lib\site-packages\django\db\models\sql\compiler.py", line 1623, in execute_sql
+    cursor.execute(sql, params)
+    ~~~~~~~~~~~~~~^^^^^^^^^^^^^
+  File "D:\code playground\Richline\Richline\MIS\myenv\Lib\site-packages\django\db\backends\utils.py", line 122, in execute
+    return super().execute(sql, params)
+           ~~~~~~~~~~~~~~~^^^^^^^^^^^^^
+  File "D:\code playground\Richline\Richline\MIS\myenv\Lib\site-packages\django\db\backends\utils.py", line 79, in execute
+    return self._execute_with_wrappers(
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        sql, params, many=False, executor=self._execute
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "D:\code playground\Richline\Richline\MIS\myenv\Lib\site-packages\django\db\backends\utils.py", line 92, in _execute_with_wrappers
+    return executor(sql, params, many, context)
+  File "D:\code playground\Richline\Richline\MIS\myenv\Lib\site-packages\django\db\backends\utils.py", line 100, in _execute
+    with self.db.wrap_database_errors:
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\code playground\Richline\Richline\MIS\myenv\Lib\site-packages\django\db\utils.py", line 91, in __exit__
+    raise dj_exc_value.with_traceback(traceback) from exc_value
+  File "D:\code playground\Richline\Richline\MIS\myenv\Lib\site-packages\django\db\backends\utils.py", line 105, in _execute
+    return self.cursor.execute(sql, params)
+           ~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^
+  File "D:\code playground\Richline\Richline\MIS\myenv\Lib\site-packages\django\db\backends\sqlite3\base.py", line 360, in execute
+    return super().execute(query, params)
+           ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^
+django.db.utils.OperationalError: no such table: django_session
+"POST / HTTP/1.1" 500 148242
+Watching for file changes with StatReloader
+"GET / HTTP/1.1" 200 1674
+"POST / HTTP/1.1" 200 94872
+"POST / HTTP/1.1" 200 94872
+D:\code playground\Richline\Richline\MIS\dataextract\extractor\views.py changed, reloading.
+Watching for file changes with StatReloader
+"GET / HTTP/1.1" 200 1586
+"POST / HTTP/1.1" 200 95170
+"POST / HTTP/1.1" 200 1962
+D:\code playground\Richline\Richline\MIS\dataextract\extractor\views.py changed, reloading.
+Watching for file changes with StatReloader
+"GET / HTTP/1.1" 200 1586
+"POST / HTTP/1.1" 200 95170
+Internal Server Error: /
+Traceback (most recent call last):
+  File "D:\code playground\Richline\Richline\MIS\myenv\Lib\site-packages\django\core\handlers\exception.py", line 55, in inner
+    response = get_response(request)
+  File "D:\code playground\Richline\Richline\MIS\myenv\Lib\site-packages\django\core\handlers\base.py", line 204, in _get_response
+    self.check_response(response, callback)
+    ~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^
+  File "D:\code playground\Richline\Richline\MIS\myenv\Lib\site-packages\django\core\handlers\base.py", line 332, in check_response
+    raise ValueError(
+    ...<2 lines>...
+    )
+ValueError: The view extractor.views.upload_pdf didn't return an HttpResponse object. It returned None instead.
+"POST / HTTP/1.1" 500 71367
+D:\code playground\Richline\Richline\MIS\dataextract\extractor\views.py changed, reloading.
+Watching for file changes with StatReloader
+"GET / HTTP/1.1" 200 1586
+"POST / HTTP/1.1" 200 95170
+"POST / HTTP/1.1" 200 1872
+D:\code playground\Richline\Richline\MIS\dataextract\extractor\views.py changed, reloading.
+Watching for file changes with StatReloader
+D:\code playground\Richline\Richline\MIS\dataextract\extractor\views.py changed, reloading.
+Watching for file changes with StatReloader
+"GET / HTTP/1.1" 200 1586
+"POST / HTTP/1.1" 200 95170
+"POST / HTTP/1.1" 200 8468
+D:\code playground\Richline\Richline\MIS\dataextract\extractor\views.py changed, reloading.
+Watching for file changes with StatReloader
+"GET / HTTP/1.1" 200 1586
+"POST / HTTP/1.1" 200 95170
+"POST / HTTP/1.1" 200 1972

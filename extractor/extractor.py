@@ -4,9 +4,7 @@ import pdf2image
 import cv2
 import numpy as np
 from PIL import Image
-import pandas as pd
 from datetime import datetime
-import os
 
 pytesseract.pytesseract.tesseract_cmd = r"C:\Users\Samuel Aaron\AppData\Local\Programs\Tesseract-OCR\tesseract.exe"
 
@@ -30,7 +28,7 @@ class PDFOCRExtractor:
             )
             return images if images else None
         except Exception as e:
-            # PDF to Image Conversion FAILED
+            print(f"PDF to Image Conversion FAILED: {e}")
             return None
 
     def preprocess_image(self, image):
@@ -41,14 +39,14 @@ class PDFOCRExtractor:
             _, thresh = cv2.threshold(denoised, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
             return Image.fromarray(thresh)
         except Exception as e:
-            # Image preprocessing failed
+            print(f"Image preprocessing failed: {e}")
             return image
 
     def extract_text(self, image):
         try:
             return pytesseract.image_to_string(image)
         except Exception as e:
-            # OCR extraction failed
+            print(f"OCR extraction failed: {e}")
             return ""
 
     def extract_global_fields(self, lines, full_text):
@@ -226,43 +224,65 @@ class PDFOCRExtractor:
 
     def extract_vendor_item_from_ocr(self, item_line, item_text):
         if not item_line or not item_text:
+            print("DEBUG - item_line or item_text is None/empty")
             return None
+
+        print(f"DEBUG - item_line: {item_line}")
+        print(f"DEBUG - item_text first 200 chars: {item_text[:200]}")
 
         try:
             item_vendor_pattern = r'Item \d+:\s*([A-Z0-9]+)\s+Vendor Style:\s*([A-Z0-9]+)'
             match = re.search(item_vendor_pattern, item_text)
             if match:
+                print(f"DEBUG - Pattern 0 matched: {match.group(1)}")
                 return match.group(1)
             
             richline_match = re.search(r'^([A-Z0-9]+)', item_line)
             if richline_match:
                 richline_item = richline_match.group(1)
+                print(f"DEBUG - Richline item extracted: {richline_item}")
                 lines = item_text.split('\n')
+                print(f"DEBUG - Lines in item_text: {lines}")
 
                 for line in lines:
                     if not line:
                         continue
                     line = line.strip()
+                    print(f"DEBUG - Checking line: '{line}'")
 
                     vendor_match = re.match(r'^([A-Z0-9-]+)', line)
                     if vendor_match:
                         potential_vendor = vendor_match.group(1)
+                        print(f"DEBUG - Potential vendor extracted: {potential_vendor}")
 
                         if (len(potential_vendor) < len(richline_item) and richline_item.startswith(potential_vendor)):
+                            print(f"DEBUG - Pattern 1 matched: {potential_vendor}")
                             return potential_vendor
                         elif 5 <= len(potential_vendor) <= 15 and '-' in potential_vendor:
+                            print(f"DEBUG - Pattern 1 matched (hyphenated): {potential_vendor}")
                             return potential_vendor
                         
                     if re.match(r'^[A-Z0-9]+$', line):
+                        print(f"DEBUG - Line matches alphanumeric pattern")
                         if len(line) < len(richline_item):
+                            print(f"DEBUG - Line is shorter than richline item")
                             if richline_item.startswith(line):
+                                print(f"DEBUG - Pattern 1 matched: {line}")
                                 return line
                             elif 5 <= len(line) <= 15:
+                                print(f"DEBUG - Pattern 1 matched (non-prefix): {line}")
                                 return line
+                            else:
+                                print(f"DEBUG - Richline item doesn't start with this line")
+                        else:
+                            print(f"DEBUG - Line is not shorter than richline item")
+                    else:
+                        print(f"DEBUG - Line doesn't match alphanumeric pattern")
             
             vendor_pattern1 = r'[A-Z]{2}\d{4}[A-Z0-9]+\s+([A-Z]{2}\d{3,6}[A-Z0-9]*)'
             match = re.search(vendor_pattern1, item_line)
             if match:
+                print(f"DEBUG - Pattern 2 matched: {match.group(1)}")
                 return match.group(1)   
             
             vendor_patterns = [
@@ -274,10 +294,12 @@ class PDFOCRExtractor:
             for i, pattern in enumerate(vendor_patterns):
                 match = re.search(pattern, item_text)
                 if match:
+                    print(f"DEBUG - Pattern 3.{i} matched: {match.group(1)}")
                     return match.group(1)
-
+            print("DEBUG - Entering Universal Pattern")
             if richline_match:
                 richline_item = richline_match.group(1)
+                print(f"DEBUG - Universal Pattern: richline_item = {richline_item}")
                 lines = item_text.split('\n')
 
                 candidates = []
@@ -285,16 +307,23 @@ class PDFOCRExtractor:
                     if not line:
                         continue
                     line = line.strip()
+                    print(f"DEBUG - Universal checking: '{line}', length: {len(line)}")
 
                     if (re.match(r'^[A-Z0-9-]+$', line) and 5 <= len(line) <= 15 and line != richline_item): 
                         candidates.append(line)
+                        print(f"DEBUG - Universal candidate found: {line}")
 
+                print(f"DEBUG - Universal candidates: {candidates}")
                 if candidates:
+                    print(f"DEBUG - Universal pattern matched: {candidates[0]}")
                     return candidates[0]
-            
+            else:
+                print("DEBUG - No richline_match for Universal Pattern")    
+            print("DEBUG - No patterns matched")
             return None
         
         except Exception as e:
+            print(f"DEBUG - Error in extract_vendor_item_from_ocr: {e}")
             return None                       
 
     def extract_size_from_description(self, description):
@@ -390,14 +419,21 @@ class PDFOCRExtractor:
         
         job_patterns = [r"(RFP\s*\d{6,})", r"(RSET\s*\d{6,})"]
         
+        print(f"DEBUG - Looking for job # in item: {item.get('Richline Item #', 'Unknown')}")
+        print(f"DEBUG - Item text first 300 chars: {item_text[:300]}")
+
         for pattern in job_patterns:
             match = re.search(pattern, item_text)
             if match:
                 job_number = match.group(1).replace(" ", "")
                 item["Job #"] = job_number
+                print(f"DEBUG - Job # found: {job_number}")
                 break
+        else:
+            print(f"DEBUG - No match for pattern: {pattern}")
 
         if "Job #" not in item:
+            print("DEBUG - No Job # found for this item")
             for pattern in job_patterns:
                 start_idx = max(0, global_start_idx - 15)
                 end_idx = min(len(all_lines), global_start_idx + 40)
@@ -431,6 +467,7 @@ class PDFOCRExtractor:
                 for i, pattern in enumerate(vendor_patterns):
                     match = re.search(pattern, item_text)
                     if match:
+                        print(f"DEBUG - Pattern 3.{i} matched: {match.group(1)}")
                         item["Vendor Item #"] = match.group(1)
                         break
         
@@ -639,6 +676,9 @@ class PDFOCRExtractor:
 
     def parse_component_line_enhanced(self, line):
         """Parse component line with correct Tot. Weight extraction"""
+        print(f"\n=== COMPONENT DEBUG ===")
+        print(f"Raw line: '{line}'")
+
         component = {
             "Component": "",
             "Cost ($)": "",
@@ -666,6 +706,7 @@ class PDFOCRExtractor:
         # Parse pipe-separated table format (MAIN FIX HERE)
         if "|" in line:
             columns = [col.strip() for col in line.split("|")]
+            print(f"All columns: {[f'{i}: {col}' for i, col in enumerate(columns)]}")
         
             # Remove empty columns at start/end
             while columns and not columns[0]:
@@ -685,6 +726,7 @@ class PDFOCRExtractor:
                             break
                         
                 except IndexError:
+                    print(f"Not enough columns in line: {len(columns)}")
                     # Fallback to non-pipe parsing
                     pass
             else:
@@ -695,40 +737,26 @@ class PDFOCRExtractor:
         if not component["Component"]:
             component_patterns = [
                 # CS patterns - most common
-                r'\b(CS\d{1,4}(?:/\d{1,4}(?:\.\d+)?)?[A-Z]{0,3}(?:-[A-Z0-9]+)+)\b',
                 r'\b(CS[0-9/\.-]+(?:-[A-Z0-9]+)*)', r'\b(CS[A-Z0-9\./\-]+)',
                 r'\b(CS\d+/\d+(?:\.\d+)?(?:NV|OV|PS|HS|RDP)-[A-Z0-9]+)',  # CS5/2.5NV-CR, CS9/7-OV-CS
                 r'\b(CS\d+(?:/\d+(?:\.\d+)?)?-[A-Z0-9]+-[A-Z0-9]+)',      # CS0025-R-CR, CS0020-R-E2A
-                r'\b(CS\d+(?:/\d+(?:\.\d+)?)?[A-Z]+-[A-Z0-9]+)',
-                r'\b(CS\d+[/-]|LD\d+[/.]|OT-CHR\d+-\d+)\b', 
+                r'\b(CS\d+(?:/\d+(?:\.\d+)?)?[A-Z]+-[A-Z0-9]+)', 
                 # Specific component types
-                r'\b(CUN\.[A-Z]+\.\d+\.\d+)\b', 
-                r'\b(\d{1,4}/\d{1,4}(?:\.\d+)?[A-Z]{0,3}(?:-[A-Z0-9]+)+)\b',
-                r'\b(THP-[A-Z0-9\-]+)\b',
                 r'\b(THP-WH\d+-[A-Z]+)',
                 r'\b(THP-[A-Z0-9\-]+)', 
                 r'\b([0-9]{2}XX[0-9]{4}-[A-Z0-9]+)',
-                r'\b(SSC\d{6,8}[A-Z0-9]*)\b',
                 r'\b(SSC[0-9]+[A-Z0-9]*)', 
                 r'\b(PKG[0-9]+)',
-                r'\b(PKG\d{4,6})\b',
-                r'\b(TRC\d{6,8}[A-Z0-9]*)\b',
-                r'\b(TRC[0-9]+[A-Z0-9]*)',
-                r'\b(CHR[A-Z0-9]+W?-\d+[A-Z]?)\b', 
+                r'\b(TRC[0-9]+[A-Z0-9]*)', 
                 r'\b(CHR[A-Z0-9]+W?-\d+[A-Z]?)',
-                r'\b(OT-[A-Z0-9\-]+)\b',
                 r'\b(OT-[A-Z0-9]+)',
                 r'\b(OT-CHR\d+-\d+)', 
                 r'\b(OT-[A-Z]+\d*)', 
-                r'\b(R\d{3,5}-\d{2,4}[A-Z0-9\-]*)\b',
                 r'\b(R[0-9]{3}-[0-9]+[A-Z\-]*)',
-                r'\b(CN\d{4,6}-[A-Z0-9\-]+)\b',
                 r'\b(CN\d{4}-[A-Z0-9]+-\d+)',
                 r'\b(CN[0-9]{4}-[A-Z0-9\-]+)',
-                r'\b(MS\d{4,6}-[A-Z0-9]+)\b',
                 r'\b(MS\d{4}-[A-Z0-9]+)', 
                 r'\b(MS[0-9]{4}-[A-Z0-9]+)',
-                r'\b(A\d{1,2}/\.\d{3,4})\b',
                 r'\b(A\d+/\.\d+)',
                 r'\b(A[0-9]+/\.[0-9]+)',
                 # CHSBOXIML pattern - ADD THIS
@@ -740,12 +768,10 @@ class PDFOCRExtractor:
                 # Other patterns
                 r'\b(H[0-9]+/[0-9\.]+)',
                 r'\b([A-Z]{1,4}\d{1,6}[A-Z0-9\./\-]*)',
-                r'\b([A-Z]+\d+[A-Z]*(?:[/\.-][A-Z0-9]+)*)', 
-                r'\b([A-Z0-9]{2,}[/-][A-Z0-9./-]{2,})\b',
+                r'\b([A-Z]+\d+[A-Z]*(?:[/\.-][A-Z0-9]+)*)',
                 r'\b([0-9]{4}-[A-Z]+-[A-Z]+)',
                 r'\b([0-9]/[0-9\.]+-[A-Z]+-[A-Z]+)', 
                 r'\b([0-9]/[0-9\.]+)',
-                r'\b([A-Z0-9\-]{5,})\b',
                 r'\b([0-9]+/[0-9\.]+[A-Z]*-[A-Z0-9]+)',
             ]
         
@@ -756,6 +782,7 @@ class PDFOCRExtractor:
                     break
         
             values = re.findall(r'(\d+\.\d+)\s*(CT|EA|GR)', line)
+            print(f"Found values: {values}")
         
             if len(values) >= 3:
                 component["Cost ($)"] = f"{values[0][0]} {values[0][1]}"
@@ -774,6 +801,9 @@ class PDFOCRExtractor:
                 component["Supply Policy"] = "Drop Ship"
             elif "by vendor" in line_lower:
                 component["Supply Policy"] = "By Vendor"
+
+        print(f"Final component: Component='{component['Component']}', Cost='{component['Cost ($)']}', Tot Weight='{component['Tot. Weight']}', Policy='{component['Supply Policy']}'")
+        print(f"=== END COMPONENT DEBUG ===\n")
 
         return component if component["Component"] else None
 
@@ -914,133 +944,3 @@ class PDFOCRExtractor:
                 "debug": debug,
                 "traceback": traceback.format_exc()
             }
-        
-def export_to_excel(extracted_data, base_filename="Daily_PO_Extracts"):
-    """Export extracted PDF data to daily Excel file"""
-    
-    # Create daily filename
-    today = datetime.now().strftime("%Y-%m-%d")
-    filename = f"{base_filename}_{today}.xlsx"
-    
-    # Check if file exists
-    file_exists = os.path.exists(filename)
-    
-    if file_exists:
-        # Read existing data
-        try:
-            existing_global = pd.read_excel(filename, sheet_name='Global_Data')
-            existing_items = pd.read_excel(filename, sheet_name='Items_Summary')
-            existing_components = pd.read_excel(filename, sheet_name='Components_Detail')
-        except:
-            # If sheets don't exist, create empty dataframes
-            existing_global = pd.DataFrame()
-            existing_items = pd.DataFrame()
-            existing_components = pd.DataFrame()
-    else:
-        # Create empty dataframes for new file
-        existing_global = pd.DataFrame()
-        existing_items = pd.DataFrame()
-        existing_components = pd.DataFrame()
-    
-    # Prepare new data
-    new_global = pd.DataFrame()
-    new_items = pd.DataFrame()
-    new_components = pd.DataFrame()
-    
-    # Add timestamp and PO number for tracking
-    timestamp = datetime.now().strftime("%H:%M:%S")
-    po_number = extracted_data.get('global', {}).get('PO #', 'Unknown')
-    
-    # 1. Process Global Data
-    if 'global' in extracted_data:
-        global_data = extracted_data['global'].copy()
-        global_data['Extraction_Time'] = timestamp
-        global_data['Extraction_Date'] = today
-        new_global = pd.DataFrame([global_data])
-    
-    # 2. Process Items Data
-    if 'items' in extracted_data:
-        items_list = []
-        for item_idx, item in enumerate(extracted_data['items']):
-            item_row = {
-                'PO_Number': po_number,
-                'Extraction_Time': timestamp,
-                'Extraction_Date': today,
-                'Item_Index': item_idx + 1
-            }
-            
-            # Basic item info
-            for key, value in item.items():
-                if key != 'Components' and not isinstance(value, dict):
-                    item_row[key] = value
-                elif isinstance(value, dict):
-                    # Flatten nested dictionaries
-                    for sub_key, sub_value in value.items():
-                        item_row[f"{key}_{sub_key}"] = sub_value
-            
-            # Component count
-            item_row['Component_Count'] = len(item.get('Components', []))
-            items_list.append(item_row)
-        
-        if items_list:
-            new_items = pd.DataFrame(items_list)
-    
-    # 3. Process Components Data
-    if 'items' in extracted_data:
-        components_list = []
-        for item_idx, item in enumerate(extracted_data['items']):
-            richline_item = item.get('Richline Item #', f'Item_{item_idx+1}')
-            vendor_item = item.get('Vendor Item #', '')
-            job_number = item.get('Job #', '')
-            
-            for comp in item.get('Components', []):
-                comp_row = {
-                    'PO_Number': po_number,
-                    'Extraction_Time': timestamp,
-                    'Extraction_Date': today,
-                    'Item_Index': item_idx + 1,
-                    'Richline_Item': richline_item,
-                    'Vendor_Item': vendor_item,
-                    'Job_Number': job_number,
-                    'Component': comp.get('Component', ''),
-                    'Cost': comp.get('Cost ($)', ''),
-                    'Tot_Weight': comp.get('Tot. Weight', ''),
-                    'Supply_Policy': comp.get('Supply Policy', '')
-                }
-                components_list.append(comp_row)
-        
-        if components_list:
-            new_components = pd.DataFrame(components_list)
-    
-    # Combine existing and new data
-    if not existing_global.empty and not new_global.empty:
-        combined_global = pd.concat([existing_global, new_global], ignore_index=True)
-    elif not new_global.empty:
-        combined_global = new_global
-    else:
-        combined_global = existing_global
-    
-    if not existing_items.empty and not new_items.empty:
-        combined_items = pd.concat([existing_items, new_items], ignore_index=True)
-    elif not new_items.empty:
-        combined_items = new_items
-    else:
-        combined_items = existing_items
-    
-    if not existing_components.empty and not new_components.empty:
-        combined_components = pd.concat([existing_components, new_components], ignore_index=True)
-    elif not new_components.empty:
-        combined_components = new_components
-    else:
-        combined_components = existing_components
-    
-    # Write to Excel
-    with pd.ExcelWriter(filename, engine='openpyxl') as writer:
-        if not combined_global.empty:
-            combined_global.to_excel(writer, sheet_name='Global_Data', index=False)
-        if not combined_items.empty:
-            combined_items.to_excel(writer, sheet_name='Items_Summary', index=False)
-        if not combined_components.empty:
-            combined_components.to_excel(writer, sheet_name='Components_Detail', index=False)
-    
-    return filename, len(existing_global) > 0  

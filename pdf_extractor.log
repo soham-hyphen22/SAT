@@ -2377,3 +2377,15 @@ Watching for file changes with StatReloader
 "GET / HTTP/1.1" 200 1586
 "POST / HTTP/1.1" 200 95170
 "POST / HTTP/1.1" 200 1972
+"POST / HTTP/1.1" 200 34495
+"POST / HTTP/1.1" 200 44433
+D:\code playground\Richline\Richline\MIS\dataextract\extractor\views.py changed, reloading.
+Watching for file changes with StatReloader
+D:\code playground\Richline\Richline\MIS\dataextract\extractor\extractor.py changed, reloading.
+Watching for file changes with StatReloader
+"GET / HTTP/1.1" 200 1586
+"POST / HTTP/1.1" 200 34451
+"POST / HTTP/1.1" 200 44521
+"POST / HTTP/1.1" 200 29275
+"POST / HTTP/1.1" 200 29275
+"POST / HTTP/1.1" 200 44521

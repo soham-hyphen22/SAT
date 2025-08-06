@@ -8,6 +8,72 @@ from datetime import datetime
 
 pytesseract.pytesseract.tesseract_cmd = r"C:\Users\Samuel Aaron\AppData\Local\Programs\Tesseract-OCR\tesseract.exe"
 
+# ADD THIS ENTIRE CLASS BEFORE PDFOCRExtractor
+class AccuracyIntelligence:
+    def __init__(self):
+        self.field_accuracy = {}
+        self.extraction_history = []
+        self.accuracy_patterns = {}
+    
+    def validate_extraction(self, result):
+        """Validate extraction accuracy and suggest improvements"""
+        validation = {
+            "accuracy_score": 0,
+            "field_scores": {},
+            "issues": [],
+            "suggestions": []
+        }
+        
+        global_data = result.get("global", {})
+        
+        # Validate each field
+        for field, value in global_data.items():
+            field_score = self.validate_field(field, value)
+            validation["field_scores"][field] = field_score
+            
+            if field_score < 0.9:  # Less than 90% confidence
+                validation["issues"].append(f"{field}: Low confidence ({field_score:.1f})")
+                validation["suggestions"].append(f"Review pattern for {field}")
+        
+        # Calculate overall accuracy
+        if validation["field_scores"]:
+            validation["accuracy_score"] = sum(validation["field_scores"].values()) / len(validation["field_scores"])
+        
+        return validation
+    
+    def validate_field(self, field_name, field_value):
+        """Validate individual field accuracy"""
+        if not field_value:
+            return 0.0
+        
+        # Field-specific validation rules for RPO documents
+        validators = {
+            "PO #": lambda x: 1.0 if re.match(r'^RPO\d+$', str(x)) else 0.3,
+            "Vendor ID #": lambda x: 1.0 if 3 <= len(str(x)) <= 20 else 0.5,
+            "Due Date": lambda x: 1.0 if re.match(r'\d{1,2}/\d{1,2}/\d{2,4}', str(x)) else 0.3,
+            "Order Type": lambda x: 1.0 if str(x).upper() in ["STOCK", "MCH", "SPC", "ASSAY", "ASSET"] else 0.4,
+            "Gold Rate": lambda x: self.validate_rate(x, 1500, 3000),
+            "Silver Rate": lambda x: self.validate_rate(x, 15, 50),
+            "Platinum Rate": lambda x: self.validate_rate(x, 800, 1500),
+            "Vendor Name": lambda x: 1.0 if len(str(x)) >= 5 else 0.6
+        }
+        
+        if field_name in validators:
+            return validators[field_name](field_value)
+        
+        return 0.8  # Default confidence for other fields
+    
+    def validate_rate(self, rate_value, min_val, max_val):
+        """Validate if rate is in reasonable range"""
+        try:
+            rate = float(str(rate_value).replace(',', ''))
+            if min_val <= rate <= max_val:
+                return 1.0
+            else:
+                return 0.4  # Rate exists but seems unreasonable
+        except:
+            return 0.2  # Invalid rate format
+
 class PDFOCRExtractor:
     def __init__(self):
         self.global_patterns = {
@@ -16,11 +82,12 @@ class PDFOCRExtractor:
             "Location": r"Location[:\s]*([A-Z]{2})",
         }
         self.job_pattern = r"(RFP\d{6,}|RSET\d{6,})"
+        self.accuracy_intelligence = AccuracyIntelligence()
 
     def convert_pdf_to_image(self, pdf_file):
         poppler_path = r"C:\Users\Samuel Aaron\Documents\Release-24.08.0-0\poppler-24.08.0\Library\bin"
         try:
-            pdf_file.seek(0)
+            pdf_file.seek(0)        
             images = pdf2image.convert_from_bytes(
                 pdf_file.read(),
                 dpi=300,
@@ -52,11 +119,24 @@ class PDFOCRExtractor:
     def extract_global_fields(self, lines, full_text):
         result = {}
 
-        # Extract basic patterns
+        first_page_fields = ["Location", "PO #", "PO Date"]
+
+        pages = full_text.split('#page')
+    
         for field, pattern in self.global_patterns.items():
-            match = re.search(pattern, full_text, re.IGNORECASE)
-            if match:
-                result[field] = match.group(1).replace(",", "")
+            match_found = False
+        
+            if field in first_page_fields and len(pages) > 1:
+                first_page = pages[1] if len(pages) > 1 else full_text
+                match = re.search(pattern, first_page, re.IGNORECASE)
+                if match:
+                    result[field] = match.group(1).replace(",", "")
+                    match_found = True
+        
+            if not match_found:
+                match = re.search(pattern, full_text, re.IGNORECASE)
+                if match:
+                    result[field] = match.group(1).replace(",", "")
 
         # Extract Due Date
         due_date_patterns = [
@@ -684,15 +764,16 @@ class PDFOCRExtractor:
             "Cost ($)": "",
             "Tot. Weight": "",
             "Supply Policy": ""
-        }
+        }   
 
         line = line.strip()
         if not line or len(line) < 3:
             return None
 
-        # Skip header and invalid lines
         skip_patterns = [
+            r'Supplied By\s+Component\s+Setting',
             r'^\s*\|\s*Supplied by\s*\|',
+            r'^\s*Component\s+Setting\s+Typ',
             r'^\s*Component\s+Cost\s+Weight',
             r'^\s*Total\s*:',
             r'^\s*Supplied by\s+Component\s+Setting Typ',
@@ -703,83 +784,101 @@ class PDFOCRExtractor:
             if re.search(pattern, line, re.IGNORECASE):
                 return None
 
-        # Parse pipe-separated table format (MAIN FIX HERE)
         if "|" in line:
             columns = [col.strip() for col in line.split("|")]
             print(f"All columns: {[f'{i}: {col}' for i, col in enumerate(columns)]}")
-        
-            # Remove empty columns at start/end
+
             while columns and not columns[0]:
                 columns.pop(0)
             while columns and not columns[-1]:
                 columns.pop()
-            
+
             if len(columns) >= 7:
                 try:
                     component["Component"] = columns[1]
                     component["Cost ($)"] = columns[4]
                     component["Tot. Weight"] = columns[6]
-                
+
                     for col in columns[7:]:
                         if re.search(r'(Send To|Drop Ship|By Vendor)', col, re.IGNORECASE):
                             component["Supply Policy"] = col
                             break
-                        
+
                 except IndexError:
-                    print(f"Not enough columns in line: {len(columns)}")
-                    # Fallback to non-pipe parsing
                     pass
             else:
-                 # Fallback to non-pipe parsing if columns are not as expected
-                 pass
-        
-        # If pipe parsing fails or isn't applicable, use regex fallback
+                if len(columns) > 0:
+                    print(f"Not enough columns in line: {len(columns)}")
+
         if not component["Component"]:
-            component_patterns = [
-                # CS patterns - most common
-                r'\b(CS[0-9/\.-]+(?:-[A-Z0-9]+)*)', r'\b(CS[A-Z0-9\./\-]+)',
-                r'\b(CS\d+/\d+(?:\.\d+)?(?:NV|OV|PS|HS|RDP)-[A-Z0-9]+)',  # CS5/2.5NV-CR, CS9/7-OV-CS
-                r'\b(CS\d+(?:/\d+(?:\.\d+)?)?-[A-Z0-9]+-[A-Z0-9]+)',      # CS0025-R-CR, CS0020-R-E2A
-                r'\b(CS\d+(?:/\d+(?:\.\d+)?)?[A-Z]+-[A-Z0-9]+)', 
-                # Specific component types
-                r'\b(THP-WH\d+-[A-Z]+)',
-                r'\b(THP-[A-Z0-9\-]+)', 
-                r'\b([0-9]{2}XX[0-9]{4}-[A-Z0-9]+)',
-                r'\b(SSC[0-9]+[A-Z0-9]*)', 
-                r'\b(PKG[0-9]+)',
-                r'\b(TRC[0-9]+[A-Z0-9]*)', 
-                r'\b(CHR[A-Z0-9]+W?-\d+[A-Z]?)',
-                r'\b(OT-[A-Z0-9]+)',
-                r'\b(OT-CHR\d+-\d+)', 
-                r'\b(OT-[A-Z]+\d*)', 
-                r'\b(R[0-9]{3}-[0-9]+[A-Z\-]*)',
-                r'\b(CN\d{4}-[A-Z0-9]+-\d+)',
-                r'\b(CN[0-9]{4}-[A-Z0-9\-]+)',
-                r'\b(MS\d{4}-[A-Z0-9]+)', 
-                r'\b(MS[0-9]{4}-[A-Z0-9]+)',
-                r'\b(A\d+/\.\d+)',
-                r'\b(A[0-9]+/\.[0-9]+)',
-                # CHSBOXIML pattern - ADD THIS
-                r'\b(CHSBOXIML-\d+)',
-                r'\b(CHS[A-Z]+ML-\d+)',
-                # LD patterns
-                r'\b(LD[A-Z]*[0-9]+[A-Z]*[/\.][0-9\.]+)', r'\b(LD[A-Z]*[0-9]+/[0-9\.]+)',
-                r'\b(LD[A-Z0-9\.]+)',
-                # Other patterns
-                r'\b(H[0-9]+/[0-9\.]+)',
-                r'\b([A-Z]{1,4}\d{1,6}[A-Z0-9\./\-]*)',
-                r'\b([A-Z]+\d+[A-Z]*(?:[/\.-][A-Z0-9]+)*)',
-                r'\b([0-9]{4}-[A-Z]+-[A-Z]+)',
-                r'\b([0-9]/[0-9\.]+-[A-Z]+-[A-Z]+)', 
-                r'\b([0-9]/[0-9\.]+)',
-                r'\b([0-9]+/[0-9\.]+[A-Z]*-[A-Z0-9]+)',
-            ]
+            parts = line.split()
+            if len(parts) >= 8:
+                candidates = []
+
+                for i, part in enumerate(parts[:4]):  # Check first 4 parts
+                    score = 0
+
+                    if len(part) >= 3: score += 2
+                    if '/' in part or '.' in part or '-' in part: score += 3
+                    if re.match(r'^[A-Z]', part): score += 2
+                    if part.startswith(('PKG', 'CHS', 'MPS')): score += 5
+                    if re.match(r'^[A-Z]+\d+', part): score += 3
+                    if part.isdigit() and len(part) < 3: score -= 5
+                    if part in ['BS', 'MS', 'PS', 'PH', 'PHW']: score -= 3
+
+                    candidates.append((score, i, part))
+
+                # Pick highest scoring candidate
+                if candidates:
+                    candidates.sort(reverse=True)
+                    component["Component"] = candidates[0][2]
+                else:
+                    component["Component"] = parts[0] if parts else ""
+
+            # Extract values
+            weight_values = []
+            for i in range(len(parts) - 1):
+                if re.match(r'^\d+\.\d+$', parts[i]) and parts[i + 1] in ['CT', 'EA', 'GR']:
+                    weight_values.append(f"{parts[i]} {parts[i + 1]}")
+
+            if len(weight_values) >= 1:
+                component["Cost ($)"] = weight_values[0]
+            if len(weight_values) >= 3:
+                component["Tot. Weight"] = weight_values[2]
+            elif len(weight_values) >= 2:
+                component["Tot. Weight"] = weight_values[1]
+
+            if not component["Component"]:
+                component_patterns = [
+                    # CS patterns - most common
+                    r'\b(CS[0-9/\.-]+(?:-[A-Z0-9]+)*)', r'\b(CS[A-Z0-9\./\-]+)',
+                    r'\b(CS\d+/\d+(?:\.\d+)?(?:NV|OV|PS|HS|RDP)-[A-Z0-9]+)',
+                    r'\b(CS\d+(?:/\d+(?:\.\d+)?)?-[A-Z0-9]+-[A-Z0-9]+)',
+                    r'\b(CS\d+(?:/\d+(?:\.\d+)?)?[A-Z]+-[A-Z0-9]+)', 
+                    # Other patterns
+                    r'\b(THP-WH\d+-[A-Z]+)', r'\b(THP-[A-Z0-9\-]+)', 
+                    r'\b([0-9]{2}XX[0-9]{4}-[A-Z0-9]+)', r'\b(SSC[0-9]+[A-Z0-9]*)', 
+                    r'\b(PKG[0-9]+)', r'\b(TRC[0-9]+[A-Z0-9]*)', 
+                    r'\b(CHR[A-Z0-9]+W?-\d+[A-Z]?)', r'\b(OT-[A-Z0-9]+)',
+                    r'\b(OT-CHR\d+-\d+)', r'\b(OT-[A-Z]+\d*)', 
+                    r'\b(R[0-9]{3}-[0-9]+[A-Z\-]*)', r'\b(CN\d{4}-[A-Z0-9]+-\d+)',
+                    r'\b(CN[0-9]{4}-[A-Z0-9\-]+)', r'\b(MS\d{4}-[A-Z0-9]+)', 
+                    r'\b(MS[0-9]{4}-[A-Z0-9]+)', r'\b(A\d+/\.\d+)',
+                    r'\b(A[0-9]+/\.[0-9]+)', r'\b(CHSBOXIML-\d+)',
+                    r'\b(CHS[A-Z]+ML-\d+)', r'\b(LD[A-Z]*[0-9]+[A-Z]*[/\.][0-9\.]+)', 
+                    r'\b(LD[A-Z]*[0-9]+/[0-9\.]+)', r'\b(LD[A-Z0-9\.]+)',   
+                    r'\b(PKG\d+)', r'\b([A-Z]+[\d/.]+)', r'\b(H[0-9]+/[0-9\.]+)',
+                    r'\b([A-Z]{1,4}\d{1,6}[A-Z0-9\./\-]*)',
+                    r'\b([A-Z]+\d+[A-Z]*(?:[/\.-][A-Z0-9]+)*)',
+                    r'\b([0-9]{4}-[A-Z]+-[A-Z]+)', r'\b([0-9]/[0-9\.]+-[A-Z]+-[A-Z]+)', 
+                    r'\b([0-9]/[0-9\.]+)', r'\b([0-9]+/[0-9\.]+[A-Z]*-[A-Z0-9]+)',
+                ]
         
-            for pattern in component_patterns:
-                match = re.search(pattern, line)
-                if match:
-                    component["Component"] = match.group(1)
-                    break
+                for pattern in component_patterns:
+                    match = re.search(pattern, line)
+                    if match:
+                        component["Component"] = match.group(1)
+                        break
         
             values = re.findall(r'(\d+\.\d+)\s*(CT|EA|GR)', line)
             print(f"Found values: {values}")
@@ -944,3 +1043,96 @@ class PDFOCRExtractor:
                 "debug": debug,
                 "traceback": traceback.format_exc()
             }
+        
+    # Add these methods at the END of your PDFOCRExtractor class
+    
+    def extract_with_accuracy_check(self, pdf_file):
+        """Extract with accuracy validation"""
+        # Use your existing extract method
+        result = self.extract(pdf_file)
+        
+        # Add accuracy validation
+        accuracy_check = self.accuracy_intelligence.validate_extraction(result)
+        result["accuracy"] = accuracy_check
+        
+        # If accuracy is low, try pattern improvements
+        if accuracy_check["accuracy_score"] < 0.9:
+            improved_result = self.try_accuracy_improvements(pdf_file, result)
+            if improved_result:
+                return improved_result
+        
+        return result
+    
+    def try_accuracy_improvements(self, pdf_file, original_result):
+        """Try to improve accuracy with alternative patterns"""
+        print("🔧 Low accuracy detected, trying improvements...")
+        
+        # Get the text for re-processing
+        images = self.convert_pdf_to_image(pdf_file)
+        if not images:
+            return original_result
+        
+        all_text = ""
+        all_lines = []
+        for image in images:
+            preprocessed_image = self.preprocess_image(image)
+            page_text = self.extract_text(preprocessed_image)
+            all_text += page_text
+            all_lines.extend(page_text.splitlines())
+        
+        # Try alternative patterns for low-confidence fields
+        improved_global = original_result.get("global", {}).copy()
+        
+        for field, score in original_result["accuracy"]["field_scores"].items():
+            if score < 0.9:  # Try to improve this field
+                improved_value = self.try_alternative_patterns(field, all_text, all_lines)
+                if improved_value:
+                    # Validate the improved value
+                    new_score = self.accuracy_intelligence.validate_field(field, improved_value)
+                    if new_score > score:
+                        improved_global[field] = improved_value
+                        print(f"✅ Improved {field}: {improved_value} (score: {score:.2f} → {new_score:.2f})")
+        
+        # Create improved result
+        improved_result = original_result.copy()
+        improved_result["global"] = improved_global
+        
+        # Re-validate accuracy
+        improved_accuracy = self.accuracy_intelligence.validate_extraction(improved_result)
+        improved_result["accuracy"] = improved_accuracy
+        
+        return improved_result
+    
+    def try_alternative_patterns(self, field, full_text, lines):
+        """Try alternative patterns for specific fields"""
+        alternative_patterns = {
+            "PO #": [
+                r"Purchase Order[:\s#]*([A-Z]*\d+)",
+                r"PO[:\s#]*([A-Z]*\d+)",
+                r"Order[:\s#]*([A-Z]*\d+)",
+                r"(RPO\d+)",  # Your original pattern
+            ],
+            "Vendor ID #": [
+                r"Vendor[:\s]+ID[:\s#]*([A-Za-z0-9\-]+)",
+                r"Supplier[:\s]+ID[:\s#]*([A-Za-z0-9\-]+)",
+                r"ID[:\s#]*([A-Za-z0-9\-]+)",
+            ],
+            "Due Date": [
+                r"Due[:\s]+Date[:\s]*(\d{1,2}/\d{1,2}/\d{2,4})",
+                r"Delivery[:\s]+Date[:\s]*(\d{1,2}/\d{1,2}/\d{2,4})",
+                r"Date[:\s]*(\d{1,2}/\d{1,2}/\d{2,4})",
+            ],
+            "Order Type": [
+                r"Order[:\s]+Type[:\s]*([A-Z]+)",
+                r"Type[:\s]*([A-Z]+)",
+                r"\b(STOCK|MCH|SPC|ASSAY|ASSET)\b",
+            ]
+        }
+        
+        if field in alternative_patterns:
+            for pattern in alternative_patterns[field]:
+                match = re.search(pattern, full_text, re.IGNORECASE)
+                if match:
+                    return match.group(1).strip()
+        
+        return None

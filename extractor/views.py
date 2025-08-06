@@ -10,7 +10,183 @@ from django import forms
 from datetime import datetime
 from io import BytesIO
 from .extractor import PDFOCRExtractor
-from .extractor import export_to_excel
+
+def export_to_excel(extracted_data, base_filename="Daily_PO_Extracts"):
+    """Export extracted PDF data to daily Excel file on Desktop"""
+
+    # Create daily filename on Desktop
+    today = datetime.now().strftime("%Y-%m-%d")
+    desktop_path = os.path.join(os.path.expanduser("~"), "Desktop")
+    filename = os.path.join(desktop_path, f"{base_filename}_{today}.xlsx")
+
+    # Check if daily file exists on Desktop
+    file_exists = os.path.exists(filename)
+
+    if file_exists:
+        try:
+            existing_data = pd.read_excel(filename)
+        except:
+            existing_data = pd.DataFrame()
+    else:
+        existing_data = pd.DataFrame()
+
+    # Prepare new data in flat structure
+    timestamp = datetime.now().strftime("%H:%M:%S")
+    new_rows = []
+
+    # Get global data
+    global_data = extracted_data.get('global', {})
+
+    # Group data by PO to avoid repetition
+    po_data = {
+        'PO #': global_data.get('PO #', ''),
+        'Location': global_data.get('Location', ''),
+        'PO Date': global_data.get('PO Date', ''),
+        'Due Date': global_data.get('Due Date', ''),
+        'Vendor ID #': global_data.get('Vendor ID #', ''),
+        'Vendor Name': global_data.get('Vendor Name', ''),
+        'Order Type': global_data.get('Order Type', ''),
+        'Gold': global_data.get('Gold Rate', ''),
+        'Platinum': global_data.get('Platinum Rate', ''),
+        'Silver': global_data.get('Silver Rate', ''),
+        'Extraction_Time': timestamp,
+        'Extraction_Date': today
+    }
+
+    # Check if this PO already exists in the file
+    po_exists = False
+    if not existing_data.empty:
+        po_exists = existing_data['PO #'].eq(po_data['PO #']).any()
+
+    # Process each item and its components
+    for item_idx, item in enumerate(extracted_data.get('items', [])):
+        components = item.get('Components', [])
+
+        # Item-level data
+        item_data = {
+            'Job #': item.get('Job #', ''),
+            'Richline Item #': item.get('Richline Item #', ''),
+            'Vendor Item #': item.get('Vendor Item #', ''),
+            'Pcs': item.get('Pieces/Carats', ''),
+            'Cast Fin Wt Gold': item.get('Fin Weight (Gold)', ''),
+            'CAST Fin WT Silver': item.get('Fin Weight (Silver)', ''),
+            'Gold Loss %': item.get('LOSS %', {}).get('Gold', ''),
+            'Silver Loss %': item.get('LOSS %', {}).get('Silver', ''),
+            'Diamond Details': item.get('Diamond Details', ''),
+            'Stone Pc': item.get('Stone Labor', ''),
+            'Labor Pc': item.get('Labor PC', ''),
+            'Unit Price': item.get('Unit Cost', ''),
+            'Metal 1': item.get('Metal 1', ''),
+            'Metal2': item.get('Metal 2', ''),
+        }
+
+        if components:
+            # Create row for each component
+            for comp_idx, component in enumerate(components):
+                row = {}
+
+                # Add PO data only for first row of first item if PO doesn't exist
+                if item_idx == 0 and comp_idx == 0 and not po_exists:
+                    row.update(po_data)
+                else:
+                    # Empty PO fields for subsequent rows
+                    row.update({
+                        'PO #': '',
+                        'Location': '',
+                        'PO Date': '',
+                        'Due Date': '',
+                        'Vendor ID #': '',
+                        'Vendor Name': '',
+                        'Order Type': '',
+                        'Gold': '',
+                        'Platinum': '',
+                        'Silver': '',
+                        'Extraction_Time': '',
+                        'Extraction_Date': ''
+                    })
+
+                # Add item data only for first component of each item
+                if comp_idx == 0:
+                    row.update(item_data)
+                else:
+                    # Empty item fields for subsequent components
+                    row.update({
+                        'Job #': '',
+                        'Richline Item #': '',
+                        'Vendor Item #': '',
+                        'Pcs': '',
+                        'Cast Fin Wt Gold': '',
+                        'CAST Fin WT Silver': '',
+                        'Gold Loss %': '',
+                        'Silver Loss %': '',
+                        'Diamond Details': '',
+                        'Stone Pc': '',
+                        'Labor Pc': '',
+                        'Unit Price': '',
+                        'Metal 1': '',
+                        'Metal2': '',
+                    })
+
+                # Always add component data
+                row.update({
+                    'Component': component.get('Component', ''),
+                    'Supply Policy': component.get('Supply Policy', ''),
+                    'Total Wt': component.get('Tot. Weight', ''),
+                    'Rate': component.get('Cost ($)', ''),
+                })
+
+                new_rows.append(row)
+        else:
+            # If no components, create one row for the item
+            row = {}
+
+            # Add PO data only for first item if PO doesn't exist
+            if item_idx == 0 and not po_exists:
+                row.update(po_data)
+            else:
+                row.update({
+                    'PO #': '',
+                    'Location': '',
+                    'PO Date': '',
+                    'Due Date': '',
+                    'Vendor ID #': '',
+                    'Vendor Name': '',
+                    'Order Type': '',
+                    'Gold': '',
+                    'Platinum': '',
+                    'Silver': '',
+                    'Extraction_Time': '',
+                    'Extraction_Date': ''
+                })
+
+            # Add item data
+            row.update(item_data)
+
+            # Empty component data
+            row.update({
+                'Component': '',
+                'Supply Policy': '',
+                'Total Wt': '',
+                'Rate': '',
+            })
+
+            new_rows.append(row)
+
+    # Create new DataFrame
+    new_data = pd.DataFrame(new_rows)
+
+    # Combine with existing data
+    if not existing_data.empty and not new_data.empty:
+        combined_data = pd.concat([existing_data, new_data], ignore_index=True)
+    elif not new_data.empty:
+        combined_data = new_data
+    else:
+        combined_data = existing_data
+
+    # Save to Desktop (no download)
+    combined_data.to_excel(filename, index=False)
+
+    return filename, len(existing_data) > 0
 
 class PDFUploadForm(forms.Form):
     pdf_file = forms.FileField(
@@ -35,10 +211,7 @@ def upload_pdf(request):
         print("🔍 DJANGO PDF UPLOAD DEBUG")
         print("=" * 50)
         
-        # Check if this is a download request (no file upload)
-        # Check if this is a download request (no file upload)
-                # Check if this is a download request (no file upload)
-                # Check if this is a download request (no file upload)
+        # Check if this is a download request
         if 'download_excel' in request.POST:
             print("📊 Download Excel request detected")
             if 'extracted_data' in request.session:
@@ -46,148 +219,19 @@ def upload_pdf(request):
                 try:
                     result = request.session['extracted_data']
                     
-                    # Create daily filename on Desktop
-                    today = datetime.now().strftime("%Y-%m-%d")
-                    desktop_path = os.path.join(os.path.expanduser("~"), "Desktop")
-                    excel_filename = os.path.join(desktop_path, f"Daily_PO_Extracts_{today}.xlsx")
-                    
-                    # Check if daily file exists on Desktop
-                    file_exists = os.path.exists(excel_filename)
-                    
-                    if file_exists:
-                        print(f"📊 Updating existing file on Desktop: {excel_filename}")
-                        try:
-                            existing_data = pd.read_excel(excel_filename)
-                        except:
-                            existing_data = pd.DataFrame()
-                    else:
-                        print(f"📊 Creating new file on Desktop: {excel_filename}")
-                        existing_data = pd.DataFrame()
-                    
-                    # Prepare new data in flat structure
-                    timestamp = datetime.now().strftime("%H:%M:%S")
-                    new_rows = []
-                    
-                    # Get global data
-                    global_data = result.get('global', {})
-                    
-                    # Process each item and its components
-                    for item in result.get('items', []):
-                        components = item.get('Components', [])
-                        
-                        if components:
-                            # Create row for each component
-                            for component in components:
-                                row = {
-                                    # PO Level Data
-                                    'PO #': global_data.get('PO #', ''),
-                                    'Job #': item.get('Job #', ''),
-                                    'Location': global_data.get('Location', ''),
-                                    'PO Date': global_data.get('PO Date', ''),
-                                    'Due Date': global_data.get('Due Date', ''),
-                                    'Vendor ID #': global_data.get('Vendor ID #', ''),
-                                    'Vendor Name': global_data.get('Vendor Name', ''),
-                                    'Order Type': global_data.get('Order Type', ''),
-                                    'Gold': global_data.get('Gold Rate', ''),
-                                    'Platinum': global_data.get('Platinum Rate', ''),
-                                    'Silver': global_data.get('Silver Rate', ''),
-                                    
-                                    # Job/Item Level Data
-                                    'Richline Item #': item.get('Richline Item #', ''),
-                                    'Vendor Item #': item.get('Vendor Item #', ''),
-                                    'Pcs': item.get('Pieces/Carats', ''),
-                                    'Cast Fin Wt Gold': item.get('Fin Weight (Gold)', ''),
-                                    'CAST Fin WT Silver': item.get('Fin Weight (Silver)', ''),
-                                    'Gold Loss %': item.get('LOSS %', {}).get('Gold', ''),
-                                    'Silver Loss %': item.get('LOSS %', {}).get('Silver', ''),
-                                    'Diamond Details': item.get('Diamond Details', ''),
-                                    'Stone Pc': item.get('Stone Labor', ''),
-                                    'Labor Pc': item.get('Labor PC', ''),
-                                    'Unit Price': item.get('Unit Cost', ''),
-                                    'Metal 1': item.get('Metal 1', ''),
-                                    'Metal2': item.get('Metal 2', ''),
-                                    
-                                    # Component Level Data
-                                    'Component': component.get('Component', ''),
-                                    'Supply Policy': component.get('Supply Policy', ''),
-                                    'Total Wt': component.get('Tot. Weight', ''),
-                                    'Rate': component.get('Cost ($)', ''),
-                                    
-                                    # Tracking Data
-                                    'Extraction_Time': timestamp,
-                                    'Extraction_Date': today
-                                }
-                                new_rows.append(row)
-                        else:
-                            # If no components, create one row for the item
-                            row = {
-                                # PO Level Data
-                                'PO #': global_data.get('PO #', ''),
-                                'Location': global_data.get('Location', ''),
-                                'PO Date': global_data.get('PO Date', ''),
-                                'Due Date': global_data.get('Due Date', ''),
-                                'Vendor ID #': global_data.get('Vendor ID #', ''),
-                                'Vendor Name': global_data.get('Vendor Name', ''),
-                                'Order Type': global_data.get('Order Type', ''),
-                                'Gold': global_data.get('Gold Rate', ''),
-                                'Platinum': global_data.get('Platinum Rate', ''),
-                                'Silver': global_data.get('Silver Rate', ''),
-                                
-                                # Job/Item Level Data
-                                'Job #': item.get('Job #', ''),
-                                'Richline Item #': item.get('Richline Item #', ''),
-                                'Vendor Item #': item.get('Vendor Item #', ''),
-                                'Pcs': item.get('Pieces/Carats', ''),
-                                'Cast Fin Wt Gold': item.get('Fin Weight (Gold)', ''),
-                                'CAST Fin WT Silver': item.get('Fin Weight (Silver)', ''),
-                                'Gold Loss %': item.get('LOSS %', {}).get('Gold', ''),
-                                'Silver Loss %': item.get('LOSS %', {}).get('Silver', ''),
-                                'Diamond Details': item.get('Diamond Details', ''),
-                                'Stone Pc': item.get('Stone Labor', ''),
-                                'Labor Pc': item.get('Labor PC', ''),
-                                'Unit Price': item.get('Unit Cost', ''),
-                                'Metal 1': item.get('Metal 1', ''),
-                                'Metal2': item.get('Metal 2', ''),
-                                
-                                # Component Level Data (empty for items without components)
-                                'Component': '',
-                                'Supply Policy': '',
-                                'Total Wt': '',
-                                'Rate': '',
-                                
-                                # Tracking Data
-                                'Extraction_Time': timestamp,
-                                'Extraction_Date': today
-                            }
-                            new_rows.append(row)
-                    
-                    # Create new DataFrame
-                    new_data = pd.DataFrame(new_rows)
-                    
-                    # Combine with existing data
-                    if not existing_data.empty and not new_data.empty:
-                        combined_data = pd.concat([existing_data, new_data], ignore_index=True)
-                    elif not new_data.empty:
-                        combined_data = new_data
-                    else:
-                        combined_data = existing_data
-                    
-                    # Save to Desktop (no download)
-                    combined_data.to_excel(excel_filename, index=False)
+                    # Use the optimized export function
+                    excel_filename, file_existed = export_to_excel(result)
                     
                     print(f"📊 File saved to Desktop: {excel_filename}")
-                    print(f"📊 Total rows: {len(combined_data)}")
                     
-                    # Return success message instead of download
+                    # Return success message
                     template_data = {
                         'form': PDFUploadForm(),
-                        'success_message': f'Excel file updated successfully! Check your Desktop: Daily_PO_Extracts_{today}.xlsx',
+                        'success_message': f'Excel file updated successfully! Check your Desktop: {os.path.basename(excel_filename)}',
                         'file_info': {
-                            'filename': f'Daily_PO_Extracts_{today}.xlsx',
+                            'filename': os.path.basename(excel_filename),
                             'location': 'Desktop',
-                            'total_rows': len(combined_data),
-                            'new_rows_added': len(new_data),
-                            'file_existed': file_exists
+                            'file_existed': file_existed
                         },
                         'show_download': True
                     }

@@ -3260,3 +3260,6 @@ Watching for file changes with StatReloader
 "POST / HTTP/1.1" 200 288798
 D:\code playground\Richline\Richline\MIS\dataextract\extractor\extractor.py changed, reloading.
 Watching for file changes with StatReloader
+"POST / HTTP/1.1" 200 271402
+D:\code playground\Richline\Richline\MIS\dataextract\extractor\templatetags\custom_filters.py changed, reloading.
+Watching for file changes with StatReloader

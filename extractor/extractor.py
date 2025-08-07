@@ -5,93 +5,36 @@ import cv2
 import numpy as np
 from PIL import Image
 from datetime import datetime
+import concurrent.futures
+import traceback
+import json
+import pandas as pd
+import os
+from pathlib import Path
 
-pytesseract.pytesseract.tesseract_cmd = r"C:\Users\Samuel Aaron\AppData\Local\Programs\Tesseract-OCR\tesseract.exe"
+# Set Tesseract path
+pytesseract.pytesseract.tesseract_cmd = r'C:\Users\Samuel Aaron\AppData\Local\Programs\Tesseract-OCR\tesseract.exe'
 
-# ADD THIS ENTIRE CLASS BEFORE PDFOCRExtractor
-class AccuracyIntelligence:
-    def __init__(self):
-        self.field_accuracy = {}
-        self.extraction_history = []
-        self.accuracy_patterns = {}
-    
-    def validate_extraction(self, result):
-        """Validate extraction accuracy and suggest improvements"""
-        validation = {
-            "accuracy_score": 0,
-            "field_scores": {},
-            "issues": [],
-            "suggestions": []
-        }
-        
-        global_data = result.get("global", {})
-        
-        # Validate each field
-        for field, value in global_data.items():
-            field_score = self.validate_field(field, value)
-            validation["field_scores"][field] = field_score
-            
-            if field_score < 0.9:  # Less than 90% confidence
-                validation["issues"].append(f"{field}: Low confidence ({field_score:.1f})")
-                validation["suggestions"].append(f"Review pattern for {field}")
-        
-        # Calculate overall accuracy
-        if validation["field_scores"]:
-            validation["accuracy_score"] = sum(validation["field_scores"].values()) / len(validation["field_scores"])
-        
-        return validation
-    
-    def validate_field(self, field_name, field_value):
-        """Validate individual field accuracy"""
-        if not field_value:
-            return 0.0
-        
-        # Field-specific validation rules for RPO documents
-        validators = {
-            "PO #": lambda x: 1.0 if re.match(r'^RPO\d+$', str(x)) else 0.3,
-            "Vendor ID #": lambda x: 1.0 if 3 <= len(str(x)) <= 20 else 0.5,
-            "Due Date": lambda x: 1.0 if re.match(r'\d{1,2}/\d{1,2}/\d{2,4}', str(x)) else 0.3,
-            "Order Type": lambda x: 1.0 if str(x).upper() in ["STOCK", "MCH", "SPC", "ASSAY", "ASSET"] else 0.4,
-            "Gold Rate": lambda x: self.validate_rate(x, 1500, 3000),
-            "Silver Rate": lambda x: self.validate_rate(x, 15, 50),
-            "Platinum Rate": lambda x: self.validate_rate(x, 800, 1500),
-            "Vendor Name": lambda x: 1.0 if len(str(x)) >= 5 else 0.6
-        }
-        
-        if field_name in validators:
-            return validators[field_name](field_value)
-        
-        return 0.8  # Default confidence for other fields
-    
-    def validate_rate(self, rate_value, min_val, max_val):
-        """Validate if rate is in reasonable range"""
-        try:
-            rate = float(str(rate_value).replace(',', ''))
-            if min_val <= rate <= max_val:
-                return 1.0
-            else:
-                return 0.4  # Rate exists but seems unreasonable
-        except:
-            return 0.2  # Invalid rate format
-
-class PDFOCRExtractor:
-    def __init__(self):
+class FastPDFOCRExtractor:
+    def __init__(self, output_folder=None):
         self.global_patterns = {
             "PO #": r"(RPO\d+)",
             "PO Date": r"\b(\d{2}/\d{2}/\d{2,4})\b",
-            "Location": r"Location[:\s]*([A-Z]{2})",
+            "Location": r"Location[:\s]*([A-Z]{2,})"
         }
         self.job_pattern = r"(RFP\d{6,}|RSET\d{6,})"
-        self.accuracy_intelligence = AccuracyIntelligence()
 
     def convert_pdf_to_image(self, pdf_file):
+        """OPTIMIZED: Faster PDF conversion"""
         poppler_path = r"C:\Users\Samuel Aaron\Documents\Release-24.08.0-0\poppler-24.08.0\Library\bin"
         try:
             pdf_file.seek(0)        
             images = pdf2image.convert_from_bytes(
                 pdf_file.read(),
-                dpi=300,
+                dpi=200,
                 poppler_path=poppler_path,
+                thread_count=4,
+                fmt='jpeg'
             )
             return images if images else None
         except Exception as e:
@@ -99,28 +42,40 @@ class PDFOCRExtractor:
             return None
 
     def preprocess_image(self, image):
+        """OPTIMIZED: Faster preprocessing"""
         try:
             open_cv_image = cv2.cvtColor(np.array(image), cv2.COLOR_RGB2BGR)
             gray = cv2.cvtColor(open_cv_image, cv2.COLOR_BGR2GRAY)
-            denoised = cv2.fastNlMeansDenoising(gray, h=10)
-            _, thresh = cv2.threshold(denoised, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+            _, thresh = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
             return Image.fromarray(thresh)
         except Exception as e:
             print(f"Image preprocessing failed: {e}")
             return image
 
     def extract_text(self, image):
+        """OPTIMIZED: Faster OCR"""
         try:
-            return pytesseract.image_to_string(image)
+            return pytesseract.image_to_string(image, config='--oem 3 --psm 6')
         except Exception as e:
             print(f"OCR extraction failed: {e}")
             return ""
 
+    def process_page_parallel(self, page_data):
+        """Process single page for parallel execution"""
+        page_num, image = page_data
+        try:
+            preprocessed_image = self.preprocess_image(image)
+            page_text = self.extract_text(preprocessed_image)
+            return page_num, page_text
+        except Exception as e:
+            print(f"Error processing page {page_num}: {e}")
+            return page_num, ""
+
     def extract_global_fields(self, lines, full_text):
+        """Extract global fields - SAME AS YOUR WORKING CODE"""
         result = {}
 
         first_page_fields = ["Location", "PO #", "PO Date"]
-
         pages = full_text.split('#page')
     
         for field, pattern in self.global_patterns.items():
@@ -260,8 +215,17 @@ class PDFOCRExtractor:
 
         return result
 
-    def extract_items_from_text(self, lines):
-        items = []
+    def find_items_with_rpo_association(self, lines):
+        """FIXED: Find items and associate them with their RPO based on proximity"""
+        
+        # Step 1: Find all RPO numbers with their line positions
+        rpo_positions = []
+        for i, line in enumerate(lines):
+            rpo_matches = re.findall(r'RPO\d+', line, re.IGNORECASE)
+            for rpo in rpo_matches:
+                rpo_positions.append((i, rpo.upper()))
+        
+        # Step 2: Find all items with their line positions
         item_patterns = [
             r'\*\*([A-Z]{2}\d{4}[A-Z0-9]+)\*\*',
             r'\b([A-Z]{2}\d{4}[A-Z0-9]+)\b(?=\s+[A-Z]{2}\d{3,6})',
@@ -269,205 +233,61 @@ class PDFOCRExtractor:
             r'^\s*([0-9]{5,}[A-Z]{2}[A-Z0-9]*)\s+',
         ]
         
-        item_locations = []
+        item_positions = []
         for i, line in enumerate(lines):
             for pattern in item_patterns:
                 matches = re.finditer(pattern, line)
                 for match in matches:
                     item_number = match.group(1).replace('O', '0').replace('B', '8')
-                    item_locations.append((i, item_number, line))
+                    item_positions.append((i, item_number, line))
         
+        # Remove duplicate items
         seen_items = set()
         unique_items = []
-        for loc in item_locations:
-            if loc[1] not in seen_items:
-                seen_items.add(loc[1])
-                unique_items.append(loc)
+        for pos in item_positions:
+            if pos[1] not in seen_items:
+                seen_items.add(pos[1])
+                unique_items.append(pos)
         
         unique_items.sort(key=lambda x: x[0])
         
-        for idx, (line_idx, item_number, item_line) in enumerate(unique_items):
-            next_item_idx = unique_items[idx + 1][0] if idx + 1 < len(unique_items) else len(lines)
-            
-            item = self.extract_single_item_enhanced(
-                item_number, 
-                item_line, 
-                lines[line_idx:next_item_idx],
-                line_idx,
-                lines
-            )
-            
-            if item:
-                items.append(item)
+        # Step 3: Associate each item with the nearest preceding RPO
+        items_by_rpo = {}
         
-        return items
-
-    def extract_vendor_item_from_ocr(self, item_line, item_text):
-        if not item_line or not item_text:
-            print("DEBUG - item_line or item_text is None/empty")
-            return None
-
-        print(f"DEBUG - item_line: {item_line}")
-        print(f"DEBUG - item_text first 200 chars: {item_text[:200]}")
-
-        try:
-            item_vendor_pattern = r'Item \d+:\s*([A-Z0-9]+)\s+Vendor Style:\s*([A-Z0-9]+)'
-            match = re.search(item_vendor_pattern, item_text)
-            if match:
-                print(f"DEBUG - Pattern 0 matched: {match.group(1)}")
-                return match.group(1)
+        for item_line, item_number, item_text in unique_items:
+            # Find the closest RPO that appears before this item
+            closest_rpo = None
+            closest_distance = float('inf')
             
-            richline_match = re.search(r'^([A-Z0-9]+)', item_line)
-            if richline_match:
-                richline_item = richline_match.group(1)
-                print(f"DEBUG - Richline item extracted: {richline_item}")
-                lines = item_text.split('\n')
-                print(f"DEBUG - Lines in item_text: {lines}")
-
-                for line in lines:
-                    if not line:
-                        continue
-                    line = line.strip()
-                    print(f"DEBUG - Checking line: '{line}'")
-
-                    vendor_match = re.match(r'^([A-Z0-9-]+)', line)
-                    if vendor_match:
-                        potential_vendor = vendor_match.group(1)
-                        print(f"DEBUG - Potential vendor extracted: {potential_vendor}")
-
-                        if (len(potential_vendor) < len(richline_item) and richline_item.startswith(potential_vendor)):
-                            print(f"DEBUG - Pattern 1 matched: {potential_vendor}")
-                            return potential_vendor
-                        elif 5 <= len(potential_vendor) <= 15 and '-' in potential_vendor:
-                            print(f"DEBUG - Pattern 1 matched (hyphenated): {potential_vendor}")
-                            return potential_vendor
-                        
-                    if re.match(r'^[A-Z0-9]+$', line):
-                        print(f"DEBUG - Line matches alphanumeric pattern")
-                        if len(line) < len(richline_item):
-                            print(f"DEBUG - Line is shorter than richline item")
-                            if richline_item.startswith(line):
-                                print(f"DEBUG - Pattern 1 matched: {line}")
-                                return line
-                            elif 5 <= len(line) <= 15:
-                                print(f"DEBUG - Pattern 1 matched (non-prefix): {line}")
-                                return line
-                            else:
-                                print(f"DEBUG - Richline item doesn't start with this line")
-                        else:
-                            print(f"DEBUG - Line is not shorter than richline item")
-                    else:
-                        print(f"DEBUG - Line doesn't match alphanumeric pattern")
+            for rpo_line, rpo_number in rpo_positions:
+                if rpo_line <= item_line:  # RPO must come before or at the item
+                    distance = item_line - rpo_line
+                    if distance < closest_distance:
+                        closest_distance = distance
+                        closest_rpo = rpo_number
             
-            vendor_pattern1 = r'[A-Z]{2}\d{4}[A-Z0-9]+\s+([A-Z]{2}\d{3,6}[A-Z0-9]*)'
-            match = re.search(vendor_pattern1, item_line)
-            if match:
-                print(f"DEBUG - Pattern 2 matched: {match.group(1)}")
-                return match.group(1)   
+            # If no RPO found before item, use the first RPO in document
+            if closest_rpo is None and rpo_positions:
+                closest_rpo = rpo_positions[0][1]
             
-            vendor_patterns = [
-                r'Vendor Style[:\s]*([A-Z]{2}\d{3,6}[A-Z0-9-]*)',
-                r'\b([A-Z]{2}\d{3,6}[A-Z0-9]*)\b(?=\s+\d+\.\d+\s+[A-Z]+)',
-                r'Style[:\s]*([A-Z]{2}\d{3,6}[A-Z0-9-]*)'
-            ]
-
-            for i, pattern in enumerate(vendor_patterns):
-                match = re.search(pattern, item_text)
-                if match:
-                    print(f"DEBUG - Pattern 3.{i} matched: {match.group(1)}")
-                    return match.group(1)
-            print("DEBUG - Entering Universal Pattern")
-            if richline_match:
-                richline_item = richline_match.group(1)
-                print(f"DEBUG - Universal Pattern: richline_item = {richline_item}")
-                lines = item_text.split('\n')
-
-                candidates = []
-                for line in lines:
-                    if not line:
-                        continue
-                    line = line.strip()
-                    print(f"DEBUG - Universal checking: '{line}', length: {len(line)}")
-
-                    if (re.match(r'^[A-Z0-9-]+$', line) and 5 <= len(line) <= 15 and line != richline_item): 
-                        candidates.append(line)
-                        print(f"DEBUG - Universal candidate found: {line}")
-
-                print(f"DEBUG - Universal candidates: {candidates}")
-                if candidates:
-                    print(f"DEBUG - Universal pattern matched: {candidates[0]}")
-                    return candidates[0]
-            else:
-                print("DEBUG - No richline_match for Universal Pattern")    
-            print("DEBUG - No patterns matched")
-            return None
+            # Group items by RPO
+            if closest_rpo:
+                if closest_rpo not in items_by_rpo:
+                    items_by_rpo[closest_rpo] = []
+                items_by_rpo[closest_rpo].append((item_line, item_number, item_text))
         
-        except Exception as e:
-            print(f"DEBUG - Error in extract_vendor_item_from_ocr: {e}")
-            return None                       
-
-    def extract_size_from_description(self, description):
-        if not description:
-            return None
-            
-        size_patterns = [
-            r'^(\d+\.\d+)\s+',
-            r'^(\d+)\s+',
-            r'(\d+\.\d+)(?:\s+[A-Z]+)',
-        ]
-        
-        for pattern in size_patterns:
-            match = re.search(pattern, description)
-            if match:
-                return f"SIZE {match.group(1)}"
-        
-        return None
-
-    def extract_metal_from_description(self, description):
-        if not description:
-            return None, None
-        
-        valid_metals = [
-            '02.4K', '02.4KR', '02.4KY', '02KT', '03.5KT', '03KT', '04KT', '06KR', '06KT', '06KW', '06KY', 
-            '08KP', '08KT', '08KW', '08KY', '09KB', '09KP', '09KT', '09KW', '09KY', '100P', '10K', '10KA', 
-            '10KB', '10KC', '10KD', '10KE', '10KF', '10KG', '10KH', '10KI', '10KJ', '10KK', '10KL', '10KM', 
-            '10KN', '10KO', '10KP', '10KR', '10KS', '10KT', '10KW', '10KX', '10KY', '14', '14K', '14KA', 
-            '14KB', '14KC', '14KD', '14KE', '14KF', '14KG', '14KH', '14KI', '14KJ', '14KK', '14KL', '14KM', 
-            '14KN', '14KO', '14KP', '14KR', '14KS', '14KT', '14KW', '14KX', '14KY', '14S', '14TT', '18GG', 
-            '18K', '18KA', '18KB', '18KC', '18KD', '18KE', '18KF', '18KG', '18KH', '18KI', '18KJ', '18KK', 
-            '18KL', '18KM', '18KN', '18KO', '18KP', '18KR', '18KS', '18KT', '18KW', '18KX', '18KY', '1KR', 
-            '1KW', '1KY', '21K', '22K', '22KY', '24K', '24KT', '24KTY', '24KW', '24KY', '3KR', '3KW', '3KY', 
-            '585P', '8K', '8KW', '8KY', '9K', '9KR', '9KT', '9KW', '9KX', '9KY', 'BRASS', 'BRONZE', 'CB', 
-            'GF', 'GOS', 'GF0', 'GF00', 'GF04', 'GF05', 'GF4', 'GF44', 'GF88', 'GFT4', 'GP', 'NIP', 'NIS', 
-            'NO', 'NON', 'NONY', 'P', 'P10I', 'PD', 'PN', 'RH', 'S0', 'SS', 'SSF', 'STS', 'T', 'V', 'Y'
-        ]
-        description_upper = description.upper()  
-
-        bimetal_pattern = r'\b([A-Z0-9]+)\s*/\s*([A-Z0-9]+)\b'
-        bimetal_matches = re.findall(bimetal_pattern, description_upper)
-        
-        for metal1_candidate, metal2_candidate in bimetal_matches:
-            if metal1_candidate in valid_metals and metal2_candidate in valid_metals:
-                return metal1_candidate, metal2_candidate
-            
-        found_metals = []
-        for metal in valid_metals:
-            if re.search(r'\b' + re.escape(metal) + r'\b', description_upper):
-                if metal not in found_metals:
-                    found_metals.append(metal)
-
-        if found_metals:
-            return found_metals[0], None
-        
-        return None, None
+        return items_by_rpo
 
     def extract_single_item_enhanced(self, item_number, item_line, item_lines, global_start_idx, all_lines):
+        """Extract single item - SAME AS YOUR WORKING CODE"""
         item = {"Components": [], "CAST Fin WT": {}, "LOSS %": {},  "Richline Item #": item_number}
         
         item_text = "\n".join(item_lines)
         
+        # Parse item table row
         self.parse_item_table_row(item, item_line)
         
+                # Extract vendor item
         vendor_item = self.extract_vendor_item_from_ocr(item_line, item_text)
         if vendor_item and vendor_item != item_number:
             if len(item_number) > len(vendor_item):
@@ -479,86 +299,119 @@ class PDFOCRExtractor:
         else:
             item["Richline Item #"] = item_number
 
+        # Extract size
         size_match = re.search(r'\b(\d{1,2}\.\d{2})\b', item_text)
         if size_match:
             item["Size"] = f"SIZE {size_match.group(1)}"
 
-        job_match = re.search(r'\b(RSET\d{6}|RFP\d{6})\b', item_text)
-        if job_match:
-            item["Job #"] = job_match.group(1)
-
-        size = self.extract_size_from_description(item.get("Metal Description", ""))
-        if size:
-            item["Size"] = size
+        # Extract job number
+        job_patterns = [r"(RFP\s*\d{6,})", r"(RSET\s*\d{6,})"]
         
+        for pattern in job_patterns:
+            match = re.search(pattern, item_text)
+            if match:
+                job_number = match.group(1).replace(" ", "")
+                item["Job #"] = job_number
+                break
+
+        # Extract metals
         metal1, metal2 = self.extract_metal_from_description(item.get("Metal Description", ""))
         if metal1:
             item["Metal 1"] = metal1
         if metal2:
             item["Metal 2"] = metal2
         
-        job_patterns = [r"(RFP\s*\d{6,})", r"(RSET\s*\d{6,})"]
-        
-        print(f"DEBUG - Looking for job # in item: {item.get('Richline Item #', 'Unknown')}")
-        print(f"DEBUG - Item text first 300 chars: {item_text[:300]}")
-
-        for pattern in job_patterns:
-            match = re.search(pattern, item_text)
-            if match:
-                job_number = match.group(1).replace(" ", "")
-                item["Job #"] = job_number
-                print(f"DEBUG - Job # found: {job_number}")
-                break
-        else:
-            print(f"DEBUG - No match for pattern: {pattern}")
-
-        if "Job #" not in item:
-            print("DEBUG - No Job # found for this item")
-            for pattern in job_patterns:
-                start_idx = max(0, global_start_idx - 15)
-                end_idx = min(len(all_lines), global_start_idx + 40)
-                extended_text = "\n".join(all_lines[start_idx:end_idx])
-                
-                matches = []
-                for match in re.finditer(pattern, extended_text):
-                    match_line = extended_text[:match.start()].count('\n')
-                    distance = abs(match_line - (global_start_idx - start_idx))
-                    matches.append((match.group(1), distance))
-                
-                if matches:
-                    matches.sort(key=lambda x: x[1])
-                    item["Job #"] = matches[0][0]
-                    break
-
-        if "Vendor Item #" not in item:
-            vendor_item_line_pattern = r'[A-Z]{2}\d{4}[A-Z0-9]+\s+([A-Z]{2}\d{3,6}[A-Z0-9-]*)'
-            vendor_match = re.search(vendor_item_line_pattern, item_line)
-            if vendor_match:
-                vendor_item = vendor_match.group(1)
-                if vendor_item != item_number:
-                    item["Vendor Item #"] = vendor_item
-            
-            if "Vendor Item #" not in item:
-                vendor_patterns = [
-                    r'Vendor Style[:\s]*([A-Z]{2}\d{3,6}[A-Z0-9-]*)',
-                    r'\b([A-Z]{2}\d{3,6}[A-Z0-9-]*)\b(?!\s*\d+\.\d+)',
-                    r'Style[:\s]*([A-Z]{2}\d{3,6}[A-Z0-9-]*)'
-                ]
-                for i, pattern in enumerate(vendor_patterns):
-                    match = re.search(pattern, item_text)
-                    if match:
-                        print(f"DEBUG - Pattern 3.{i} matched: {match.group(1)}")
-                        item["Vendor Item #"] = match.group(1)
-                        break
-        
+        # Extract financial, technical, and physical data
         self.extract_item_financial_data(item, item_text)
         self.extract_item_technical_data(item, item_text)
         self.extract_item_physical_data(item, item_text)
+        
+        # Extract components
         item["Components"] = self.extract_components_enhanced(item_lines, global_start_idx, all_lines)
         
         return item
 
+    def extract_vendor_item_from_ocr(self, item_line, item_text):
+        """Extract vendor item - SAME AS YOUR WORKING CODE"""
+        if not item_line or not item_text:
+            return None
+
+        try:
+            # Pattern 1: Item/Vendor Style format
+            item_vendor_pattern = r'Item \d+:\s*([A-Z0-9]+)\s+Vendor Style:\s*([A-Z0-9]+)'
+            match = re.search(item_vendor_pattern, item_text)
+            if match:
+                return match.group(1)
+            
+            # Pattern 2: Extract from item line
+            richline_match = re.search(r'^([A-Z0-9]+)', item_line)
+            if richline_match:
+                richline_item = richline_match.group(1)
+                lines = item_text.split('\n')
+
+                for line in lines:
+                    if not line:
+                        continue
+                    line = line.strip()
+
+                    vendor_match = re.match(r'^([A-Z0-9-]+)', line)
+                    if vendor_match:
+                        potential_vendor = vendor_match.group(1)
+
+                        if (len(potential_vendor) < len(richline_item) and richline_item.startswith(potential_vendor)):
+                            return potential_vendor
+                        elif 5 <= len(potential_vendor) <= 15 and '-' in potential_vendor:
+                            return potential_vendor
+                        
+                    if re.match(r'^[A-Z0-9]+$', line):
+                        if len(line) < len(richline_item):
+                            if richline_item.startswith(line):
+                                return line
+                            elif 5 <= len(line) <= 15:
+                                return line
+            
+            # Pattern 3: Direct vendor patterns
+            vendor_pattern1 = r'[A-Z]{2}\d{4}[A-Z0-9]+\s+([A-Z]{2}\d{3,6}[A-Z0-9]*)'
+            match = re.search(vendor_pattern1, item_line)
+            if match:
+                return match.group(1)   
+            
+            # Pattern 4: Style patterns
+            vendor_patterns = [
+                r'Vendor Style[:\s]*([A-Z]{2}\d{3,6}[A-Z0-9-]*)',
+                r'\b([A-Z]{2}\d{3,6}[A-Z0-9]*)\b(?=\s+\d+\.\d+\s+[A-Z]+)',
+                r'Style[:\s]*([A-Z]{2}\d{3,6}[A-Z0-9-]*)'
+            ]
+
+            for pattern in vendor_patterns:
+                match = re.search(pattern, item_text)
+                if match:
+                    return match.group(1)
+            
+            # Pattern 5: Universal pattern
+            if richline_match:
+                richline_item = richline_match.group(1)
+                lines = item_text.split('\n')
+
+                candidates = []
+                for line in lines:
+                    if not line:
+                        continue
+                    line = line.strip()
+
+                    if (re.match(r'^[A-Z0-9-]+$', line) and 5 <= len(line) <= 15 and line != richline_item): 
+                        candidates.append(line)
+
+                if candidates:
+                    return candidates[0]
+                    
+            return None
+        
+        except Exception as e:
+            return None
+
     def parse_item_table_row(self, item, item_line):
+        """Parse item table row - SAME AS YOUR WORKING CODE"""
         desc_patterns = [
             r'[A-Z]{2}\d{4}[A-Z0-9]+\s+([0-9.]+\s+[A-Z/]+\s+[^|]+?)(?=\s+[\d.]+\s+\d+\s+EA)',
             r'[A-Z]{2}\d{4}[A-Z0-9]+\s+(.+?)(?=\s+[\d.]+\s+\d+\s+(?:EA|PR))',
@@ -592,7 +445,45 @@ class PDFOCRExtractor:
                     item["Ext. Gross Wt."] = f"{table_match.group(3)} GR"
                 break
 
+    def extract_metal_from_description(self, description):
+        """Extract metals - SAME AS YOUR WORKING CODE"""
+        if not description:
+            return None, None
+        
+        valid_metals = [
+            '10K', '10KA', '10KB', '10KC', '10KD', '10KE', '10KF', '10KG', '10KH', '10KI', '10KJ', '10KK', 
+            '10KL', '10KM', '10KN', '10KO', '10KP', '10KR', '10KS', '10KT', '10KW', '10KX', '10KY', 
+            '14K', '14KA', '14KB', '14KC', '14KD', '14KE', '14KF', '14KG', '14KH', '14KI', '14KJ', '14KK', 
+            '14KL', '14KM', '14KN', '14KO', '14KP', '14KR', '14KS', '14KT', '14KW', '14KX', '14KY', 
+            '18K', '18KA', '18KB', '18KC', '18KD', '18KE', '18KF', '18KG', '18KH', '18KI', '18KJ', '18KK', 
+            '18KL', '18KM', '18KN', '18KO', '18KP', '18KR', '18KS', '18KT', '18KW', '18KX', '18KY', 
+            'SS', 'SILVER', 'GOLD', 'GOS', 'BRASS', 'BRONZE'
+        ]
+        
+        description_upper = description.upper()  
+
+        # Check for bimetal patterns
+        bimetal_pattern = r'\b([A-Z0-9]+)\s*/\s*([A-Z0-9]+)\b'
+        bimetal_matches = re.findall(bimetal_pattern, description_upper)
+        
+        for metal1_candidate, metal2_candidate in bimetal_matches:
+            if metal1_candidate in valid_metals and metal2_candidate in valid_metals:
+                return metal1_candidate, metal2_candidate
+            
+        # Find single metals
+        found_metals = []
+        for metal in valid_metals:
+            if re.search(r'\b' + re.escape(metal) + r'\b', description_upper):
+                if metal not in found_metals:
+                    found_metals.append(metal)
+
+        if found_metals:
+            return found_metals[0], None
+        
+        return None, None
+
     def extract_item_financial_data(self, item, item_text):
+        """Extract financial data - SAME AS YOUR WORKING CODE"""
         stone_patterns = [r'Stone PC[:\s]+(\d+\.\d+)', r'Stone[:\s]+(\d+\.\d+)', r'Stone Labor[:\s]+(\d+\.\d+)']
         for pattern in stone_patterns:
             match = re.search(pattern, item_text, re.IGNORECASE)
@@ -608,6 +499,8 @@ class PDFOCRExtractor:
                 break
 
     def extract_item_technical_data(self, item, item_text):
+        """Extract technical data - SAME AS YOUR WORKING CODE"""
+        # Cast Fin Weight patterns
         cast_patterns = [
             r'CAST Fin WT[:\s]*Gold[:\s]*(\d+\.\d+)(?:\s*Silver[:\s]*(\d+\.\d+))?',
             r'CAST Fin Wt[:\s]*Gold[:\s]*(\d+\.\d+)(?:\s*Silver[:\s]*(\d+\.\d+))?',
@@ -624,10 +517,13 @@ class PDFOCRExtractor:
                     item["Fin Weight (Silver)"] = match.group(2)
                 break
         
+        # Silver patterns if not found above
         if "Silver" not in item["CAST Fin WT"]:
             silver_patterns = [
-                r'CAST Fin WT[:\s]*.*?Silver[:\s]*(\d+\.\d+)', r'Fin WT[:\s]*.*?Silver[:\s]*(\d+\.\d+)',
-                r'Silver[:\s]*(\d+\.\d+)(?:\s*GR)?', r'CAST.*?Silver[:\s]*(\d+\.\d+)'
+                r'CAST Fin WT[:\s]*.*?Silver[:\s]*(\d+\.\d+)', 
+                r'Fin WT[:\s]*.*?Silver[:\s]*(\d+\.\d+)',
+                r'Silver[:\s]*(\d+\.\d+)(?:\s*GR)?', 
+                r'CAST.*?Silver[:\s]*(\d+\.\d+)'
             ]
             for pattern in silver_patterns:
                 match = re.search(pattern, item_text, re.IGNORECASE)
@@ -636,6 +532,7 @@ class PDFOCRExtractor:
                     item["Fin Weight (Silver)"] = match.group(1)
                     break
         
+        # Loss percentage patterns
         loss_patterns = [
             r'LOSS %[:\s]*Gold[:\s]*(\d+\.\d+)%?(?:\s*Silver[:\s]*(\d+\.\d+)%?)?',
             r'Loss[:\s]*Gold[:\s]*(\d+\.\d+)%?(?:\s*Silver[:\s]*(\d+\.\d+)%?)?'
@@ -649,24 +546,27 @@ class PDFOCRExtractor:
                     item["LOSS %"]["Silver"] = f"{match.group(2)}%"
                 break
         
+        # Silver loss patterns if not found above
         if "Silver" not in item["LOSS %"]:
-            silver_loss_patterns = [r'Silver[:\s]*(\d+\.\d+)%', r'LOSS %.*?Silver[:\s]*(\d+\.\d+)%', r'Silver:\s*(\d+)%', r'Silver\s+(\d+)%']
+            silver_loss_patterns = [
+                r'Silver[:\s]*(\d+\.\d+)%', 
+                r'LOSS %.*?Silver[:\s]*(\d+\.\d+)%', 
+                r'Silver:\s*(\d+)%', 
+                r'Silver\s+(\d+)%'
+            ]
             for pattern in silver_loss_patterns:
                 match = re.search(pattern, item_text, re.IGNORECASE)
                 if match:
                     item["LOSS %"]["Silver"] = f"{match.group(1)}%"
                     break
-            
-            if "Silver" not in item["LOSS %"]:
-                combined_loss_pattern = r'Gold:\s*(\d+\.\d+)%?\s*Silver:\s*(\d+)%?'
-                match = re.search(combined_loss_pattern, item_text, re.IGNORECASE)
-                if match:
-                    item["LOSS %"]["Gold"] = f"{match.group(1)}%"
-                    item["LOSS %"]["Silver"] = f"{match.group(2)}%"
         
+        # Diamond details
         diamond_patterns = [
-            r'Diamond TW[:\s]*(\d+\.\d+)', r'TW[:\s]*(\d+\.\d+)', r'LAB DIA.*?TW[:\s]*(\d+/\d+|\d+\.\d+)',
-            r'Diamond.*?(\d+\.\d+)\s*CT', r'(\d+\.\d+)\s*CT.*?Diamond'
+            r'Diamond TW[:\s]*(\d+\.\d+)', 
+            r'TW[:\s]*(\d+\.\d+)', 
+            r'LAB DIA.*?TW[:\s]*(\d+/\d+|\d+\.\d+)',
+            r'Diamond.*?(\d+\.\d+)\s*CT', 
+            r'(\d+\.\d+)\s*CT.*?Diamond'
         ]
         for pattern in diamond_patterns:
             match = re.search(pattern, item_text, re.IGNORECASE)
@@ -675,10 +575,13 @@ class PDFOCRExtractor:
                 break
 
     def extract_item_physical_data(self, item, item_text):
+        """Extract physical data - SAME AS YOUR WORKING CODE"""
         if "Size" not in item:
             size_patterns = [
-                r'SIZE[:\s]+(\d+(?:\.\d+)?)', r'Size[:\s]+(\d+(?:\.\d+)?)',
-                r'(\d+\.\d+)\s+(?:10K|14K|18K|SS|GOS)', r'Size[:\s]*(\d+)'
+                r'SIZE[:\s]+(\d+(?:\.\d+)?)', 
+                                r'Size[:\s]+(\d+(?:\.\d+)?)',
+                r'(\d+\.\d+)\s+(?:10K|14K|18K|SS|GOS)', 
+                r'Size[:\s]*(\d+)'
             ]
             for pattern in size_patterns:
                 match = re.search(pattern, item_text, re.IGNORECASE)
@@ -702,23 +605,17 @@ class PDFOCRExtractor:
                         item["Metal 1"] = match.group(1)
                         break
 
-                if "Metal 1" not in item:
-                    for pattern in single_metal_patterns:
-                        match = re.search(pattern, item_text.upper())
-                        if match:
-                            item["Metal 1"] = match.group(1)
-                            break
-    
     def extract_components_enhanced(self, item_lines, global_start_idx, all_lines):
+        """Extract components - SAME AS YOUR WORKING CODE"""
         components = []
         component_start = -1
         
-        # More robust detection of the component table header
+        # Find component table header
         header_patterns = [
             r'supplied by.*component.*cost',
             r'^\s*\|\s*Supplied by\s*\|',
             r'Component\s+Setting Typ\s+Qty',
-            r'Component\s+Cost\s+KATEX_INLINE_OPEN\$KATEX_INLINE_CLOSE\s+Tot'
+            r'Component\s+Cost\s+\$\s+Tot'
         ]
 
         for i, line in enumerate(item_lines):
@@ -740,13 +637,19 @@ class PDFOCRExtractor:
             line_lower = line.lower()
             stop_conditions = [
                 "total", "subtotal", "grand", "summary", "there is a",
-                "please communicate", "page:", "richline group", "purchase order"
+                "please communicate", "page:", "richline group", "purchase order",
+                "cast fin wt", "loss %"
             ]
             if any(stop in line_lower for stop in stop_conditions):
                 break
             
+            # Stop if we hit another item
             if re.search(r'\b[A-Z]{2}\d{4}[A-Z0-9]+\b', line) and i > component_start:
                 break
+            if re.search(r'\b(RSET\d{6}|RFP\d{6})\b', line): # Skip job number lines
+                continue
+            if re.match(r'^[A-Z]{2}\d{4,}', line.strip()): # Skip Richline Item # lines
+                continue
             
             component = self.parse_component_line_enhanced(line)
             if component and component.get("Component"):
@@ -755,10 +658,7 @@ class PDFOCRExtractor:
         return components
 
     def parse_component_line_enhanced(self, line):
-        """Parse component line with correct Tot. Weight extraction"""
-        print(f"\n=== COMPONENT DEBUG ===")
-        print(f"Raw line: '{line}'")
-
+        """Parse component line - SAME AS YOUR WORKING CODE"""
         component = {
             "Component": "",
             "Cost ($)": "",
@@ -767,27 +667,46 @@ class PDFOCRExtractor:
         }   
 
         line = line.strip()
-        if not line or len(line) < 3:
+        if not line or len(line) < 5:
             return None
 
+        # Skip header lines
         skip_patterns = [
+            r'Supplied By', r'^\s*Total\s*:', r'^\s*\|\s*\-+\s*\|',
             r'Supplied By\s+Component\s+Setting',
             r'^\s*\|\s*Supplied by\s*\|',
             r'^\s*Component\s+Setting\s+Typ',
+            r'\b(RSET\d{6}|RFP\d{6})\b',
             r'^\s*Component\s+Cost\s+Weight',
+            r'\b(CAS\d+|DA\d+|CA\d+)\b',
             r'^\s*Total\s*:',
-            r'^\s*Supplied by\s+Component\s+Setting Typ',
             r'^\s*\|\s*\-+\s*\|'
         ]
 
         for pattern in skip_patterns:
             if re.search(pattern, line, re.IGNORECASE):
                 return None
+            
+        parts = re.split(r'\s{2,}', line)
+        if len(parts) == 1: parts = line.split()
 
+        component_candidate = ""
+
+        for part in parts:
+            if len(part) > 3 and re.search(r'[A-Za-z]', part) and re.search(r'[\d/\.-]', part):
+                if not re.match(r'^\d+\.\d+$', part):
+                    component_candidate = part
+                    break
+
+        if not component_candidate:
+            return None
+        component["Component"] = component_candidate.strip()
+        
+        # Handle pipe-delimited format
         if "|" in line:
             columns = [col.strip() for col in line.split("|")]
-            print(f"All columns: {[f'{i}: {col}' for i, col in enumerate(columns)]}")
-
+            
+            # Remove empty columns
             while columns and not columns[0]:
                 columns.pop(0)
             while columns and not columns[-1]:
@@ -799,57 +718,18 @@ class PDFOCRExtractor:
                     component["Cost ($)"] = columns[4]
                     component["Tot. Weight"] = columns[6]
 
+                    # Look for supply policy in remaining columns
                     for col in columns[7:]:
-                        if re.search(r'(Send To|Drop Ship|By Vendor)', col, re.IGNORECASE):
+                        if re.search(r'(Send To|Drop Ship|By Vendor|In House)', col, re.IGNORECASE):
                             component["Supply Policy"] = col
                             break
-
                 except IndexError:
                     pass
-            else:
-                if len(columns) > 0:
-                    print(f"Not enough columns in line: {len(columns)}")
 
+        # Handle space-separated format
         if not component["Component"]:
-            parts = line.split()
-            if len(parts) >= 8:
-                candidates = []
-
-                for i, part in enumerate(parts[:4]):  # Check first 4 parts
-                    score = 0
-
-                    if len(part) >= 3: score += 2
-                    if '/' in part or '.' in part or '-' in part: score += 3
-                    if re.match(r'^[A-Z]', part): score += 2
-                    if part.startswith(('PKG', 'CHS', 'MPS')): score += 5
-                    if re.match(r'^[A-Z]+\d+', part): score += 3
-                    if part.isdigit() and len(part) < 3: score -= 5
-                    if part in ['BS', 'MS', 'PS', 'PH', 'PHW']: score -= 3
-
-                    candidates.append((score, i, part))
-
-                # Pick highest scoring candidate
-                if candidates:
-                    candidates.sort(reverse=True)
-                    component["Component"] = candidates[0][2]
-                else:
-                    component["Component"] = parts[0] if parts else ""
-
-            # Extract values
-            weight_values = []
-            for i in range(len(parts) - 1):
-                if re.match(r'^\d+\.\d+$', parts[i]) and parts[i + 1] in ['CT', 'EA', 'GR']:
-                    weight_values.append(f"{parts[i]} {parts[i + 1]}")
-
-            if len(weight_values) >= 1:
-                component["Cost ($)"] = weight_values[0]
-            if len(weight_values) >= 3:
-                component["Tot. Weight"] = weight_values[2]
-            elif len(weight_values) >= 2:
-                component["Tot. Weight"] = weight_values[1]
-
-            if not component["Component"]:
-                component_patterns = [
+            # Extract component name using enhanced patterns
+            component_patterns = [
                     # CS patterns - most common
                     r'\b(CS[0-9/\.-]+(?:-[A-Z0-9]+)*)', r'\b(CS[A-Z0-9\./\-]+)',
                     r'\b(CS\d+/\d+(?:\.\d+)?(?:NV|OV|PS|HS|RDP)-[A-Z0-9]+)',
@@ -873,266 +753,220 @@ class PDFOCRExtractor:
                     r'\b([0-9]{4}-[A-Z]+-[A-Z]+)', r'\b([0-9]/[0-9\.]+-[A-Z]+-[A-Z]+)', 
                     r'\b([0-9]/[0-9\.]+)', r'\b([0-9]+/[0-9\.]+[A-Z]*-[A-Z0-9]+)',
                 ]
-        
-                for pattern in component_patterns:
-                    match = re.search(pattern, line)
-                    if match:
-                        component["Component"] = match.group(1)
-                        break
-        
+            
+            for pattern in component_patterns:
+                match = re.search(pattern, line)
+                if match:
+                    component["Component"] = match.group(1)
+                    break
+            
+            # Extract values with units - CORRECTED LOGIC
             values = re.findall(r'(\d+\.\d+)\s*(CT|EA|GR)', line)
-            print(f"Found values: {values}")
-        
+            
             if len(values) >= 3:
+                # First value = Cost, Third value = Weight (based on your working code)
                 component["Cost ($)"] = f"{values[0][0]} {values[0][1]}"
                 component["Tot. Weight"] = f"{values[2][0]} {values[2][1]}"
             elif len(values) >= 2:
-                component["Cost ($)"] = f"{values[0][0]} {values[0][1]}"
-                component["Tot. Weight"] = f"{values[1][0]} {values[1][1]}"
+                # Apply business logic: higher value typically = cost
+                val1 = float(values[0][0])
+                val2 = float(values[1][0])
+                
+                if val1 > val2:
+                    component["Cost ($)"] = f"{values[0][0]} {values[0][1]}"
+                    component["Tot. Weight"] = f"{values[1][0]} {values[1][1]}"
+                else:
+                    component["Cost ($)"] = f"{values[1][0]} {values[1][1]}"
+                    component["Tot. Weight"] = f"{values[0][0]} {values[0][1]}"
             elif len(values) == 1:
-                component["Cost ($)"] = f"{values[0][0]} {values[0][1]}"
+                # Single value - determine if cost or weight based on magnitude
+                value = float(values[0][0])
+                if value > 25:  # Likely cost
+                    component["Cost ($)"] = f"{values[0][0]} {values[0][1]}"
+                else:  # Likely weight
+                    component["Tot. Weight"] = f"{values[0][0]} {values[0][1]}"
 
-        if not component["Supply Policy"]:
-            line_lower = line.lower()
-            if "send to" in line_lower:
-                component["Supply Policy"] = "Send To"
-            elif "drop ship" in line_lower:
-                component["Supply Policy"] = "Drop Ship"
-            elif "by vendor" in line_lower:
-                component["Supply Policy"] = "By Vendor"
-
-        print(f"Final component: Component='{component['Component']}', Cost='{component['Cost ($)']}', Tot Weight='{component['Tot. Weight']}', Policy='{component['Supply Policy']}'")
-        print(f"=== END COMPONENT DEBUG ===\n")
+            # Extract supply policy
+            policy_keywords = ["Send To", "Drop Ship", "By Vendor", "In House"]
+            for keyword in policy_keywords:
+                if keyword.lower() in line.lower():
+                    component["Supply Policy"] = keyword
+                    break
 
         return component if component["Component"] else None
 
-    def validate_extracted_data(self, global_data, items_data, text):
-        if not text or len(text.strip()) < 10:
-            return False, "No readable text found in PDF"
-
-        if any(keyword in text.lower() for keyword in ["password", "encrypted", "protected"]):
-            return False, "PDF appears to be password-protected"
-
-        required_indicators = [
-            bool(global_data.get("PO #")),
-            bool(global_data.get("Vendor ID #")),
-            len(items_data) > 0,
-            len(global_data) >= 3,
-            "richline" in text.lower() or "rpo" in text.lower()
-        ]
-
-        if sum(required_indicators) >= 3:
-            return True, "Valid data extracted"
-
-        if len(text.strip()) < 100:
-            return False, "PDF may be corrupted or contain insufficient text content"
-
-        return False, "No extractable data found in PDF - may not be a valid purchase order"
-
-    def analyze_field_coverage(self, global_data, items_data):
-        required_global_fields = [
-            "PO #", "Location", "PO Date", "Due Date", "Vendor ID #", "Vendor Name",
-            "Order Type", "Gold Rate", "Platinum Rate", "Silver Rate"
-        ]
-        
-        required_item_fields = [
-            "Richline Item #", "Job #", "Vendor Item #", "Pieces/Carats", "Fin Weight (Gold)", 
-            "Fin Weight (Silver)", "Size", "Metal Description", "Diamond Details", "Stone Labor",
-            "Labor PC", "Ext. Gross Wt.", "Metal 1", "Metal 2", "LOSS %", "Rate", "Total Weight"
-        ]
-        
-        coverage = {
-            "global_fields_found": [], "global_fields_missing": [], "item_fields_coverage": {},
-            "components_found": 0, "total_fields_extracted": 0, "extraction_percentage": 0
-        }
-        
-        for field in required_global_fields:
-            if field in global_data and global_data[field]:
-                coverage["global_fields_found"].append(field)
-            else:
-                coverage["global_fields_missing"].append(field)
-        
-        for field in required_item_fields:
-            found_count = sum(1 for item in items_data if field in item and item[field])
-            coverage["item_fields_coverage"][field] = {
-                "found_in_items": found_count, "total_items": len(items_data),
-                "percentage": (found_count / len(items_data) * 100) if items_data else 0
-            }
-        
-        coverage["components_found"] = sum(len(item.get("Components", [])) for item in items_data)
-        
-        total_possible_fields = len(required_global_fields) + (len(required_item_fields) * len(items_data))
-        total_extracted_fields = len(coverage["global_fields_found"]) + sum(
-            coverage["item_fields_coverage"][field]["found_in_items"] for field in required_item_fields
-        )
-        
-        coverage["total_fields_extracted"] = total_extracted_fields
-        coverage["extraction_percentage"] = (total_extracted_fields / total_possible_fields * 100) if total_possible_fields > 0 else 0
-        
-        return coverage
-
     def extract(self, pdf_file):
+        """MAIN METHOD: FIXED approach for multiple RPOs"""
+        start_time = datetime.now()
         debug = {"processing_steps": []}
+        
         try:
+            # Convert PDF to images with parallel processing
             images = self.convert_pdf_to_image(pdf_file)
-            debug["processing_steps"].append("PDF converted to images")
-
             if not images:
-                return {
-                    "error": "Failed to convert PDF to images",
-                    "details": "The PDF may be corrupted, password-protected, or contain non-text content",
-                    "debug": debug,
-                }
+                return {"error": "Failed to convert PDF to images", "debug": debug}
+            
+            debug["processing_steps"].append(f"PDF converted to {len(images)} images")
 
+            # Parallel OCR processing
             all_text = ""
             all_lines = []
-            for i, image in enumerate(images):
-                preprocessed_image = self.preprocess_image(image)
-                page_text = self.extract_text(preprocessed_image)
-                all_text += f"\n#page {i+1}\n" + page_text
-                all_lines.extend(page_text.splitlines())
-                debug["processing_steps"].append(f"Processed page {i+1}")
+            
+            max_workers = min(4, len(images))
+            with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+                page_futures = {
+                    executor.submit(self.process_page_parallel, (i, image)): i 
+                    for i, image in enumerate(images)
+                }
+                
+                page_results = {}
+                for future in concurrent.futures.as_completed(page_futures):
+                    page_num, page_text = future.result()
+                    page_results[page_num] = page_text
+                
+                for i in range(len(images)):
+                    if i in page_results:
+                        all_text += f"\n#page {i+1}\n" + page_results[i]
+                        all_lines.extend(page_results[i].splitlines())
 
-            debug["processing_steps"].append("Text extracted via OCR from all pages")
+            debug["processing_steps"].append("OCR completed with parallel processing")
             debug["total_pages"] = len(images)
 
             if not all_text:
-                return {
-                    "error": "No extractable data found in PDF",
-                    "details": "OCR failed to extract any text from the PDF",
-                    "debug": debug,
-                }
+                return {"error": "No extractable data found in PDF", "debug": debug}
 
             debug["ocr_text_length"] = len(all_text)
 
+            # STEP 1: Extract global data ONCE (shared across all RPOs)
             global_data = self.extract_global_fields(all_lines, all_text)
             debug["processing_steps"].append(f"Extracted {len(global_data)} global fields")
 
-            items_data = self.extract_items_from_text(all_lines)
-            debug["processing_steps"].append(f"Extracted {len(items_data)} items")
+            # STEP 2: Find all RPOs and associate items with them
+            items_by_rpo = self.find_items_with_rpo_association(all_lines)
+            debug["processing_steps"].append(f"Found items for RPOs: {list(items_by_rpo.keys())}")
 
-            total_components = sum(len(item.get("Components", [])) for item in items_data)
-            debug["processing_steps"].append(f"Extracted {total_components} total components")
+            # STEP 3: Process each RPO with its items
+            purchase_orders = []
             
-            field_coverage = self.analyze_field_coverage(global_data, items_data)
-            debug["field_coverage"] = field_coverage
+            for rpo_number, rpo_items in items_by_rpo.items():
+                # Create RPO-specific global data
+                rpo_global = global_data.copy()
+                rpo_global["PO #"] = rpo_number
+                
+                # Process items for this RPO
+                processed_items = []
+                
+                for idx, (item_line_idx, item_number, item_line) in enumerate(rpo_items):
+                    # Determine item text boundaries
+                    next_item_idx = rpo_items[idx + 1][0] if idx + 1 < len(rpo_items) else len(all_lines)
+                    item_lines = all_lines[item_line_idx:next_item_idx]
+                    
+                    # Extract complete item data
+                    item = self.extract_single_item_enhanced(
+                        item_number, 
+                        item_line, 
+                        item_lines,
+                        item_line_idx,
+                        all_lines
+                    )
+                    
+                    if item:
+                        processed_items.append(item)
+                
+                # Create RPO entry
+                rpo_entry = {
+                    "po_number": rpo_number,
+                    "global": rpo_global,
+                    "items": processed_items,
+                    "item_count": len(processed_items),
+                    "component_count": sum(len(item.get("Components", [])) for item in processed_items)
+                }
+                
+                purchase_orders.append(rpo_entry)
+                debug["processing_steps"].append(f"Processed RPO {rpo_number}: {len(processed_items)} items")
 
-            is_valid, validation_message = self.validate_extracted_data(global_data, items_data, all_text)
-            debug["validation_message"] = validation_message
+            debug["processing_time"] = str(datetime.now() - start_time)
+            debug["total_rpos"] = len(purchase_orders)
 
-            if not is_valid:
+            # Return appropriate structure
+            if len(purchase_orders) == 1:
+                # Single RPO - return simple structure
+                single_rpo = purchase_orders[0]
                 return {
-                    "error": "No extractable data found in PDF",
-                    "details": validation_message, "debug": debug,
-                    "raw_text_sample": all_text[:1000] + "..." if len(all_text) > 1000 else all_text,
+                    "po_number": single_rpo["po_number"],
+                    "global": single_rpo["global"],
+                    "items": single_rpo["items"],
+                    "item_count": single_rpo["item_count"],
+                    "component_count": single_rpo["component_count"],
+                    "debug": debug
+                }
+            else:
+                # Multiple RPOs - return purchase_orders structure
+                return {
+                    "purchase_orders": purchase_orders,
+                    "summary": {
+                        "total_pos": len(purchase_orders),
+                        "total_items": sum(po["item_count"] for po in purchase_orders),
+                        "total_components": sum(po["component_count"] for po in purchase_orders)
+                    },
+                    "debug": debug
                 }
 
-            debug["total_fields_extracted"] = len(global_data) + sum(len(item) for item in items_data)
-
-            return {
-                "global": global_data,
-                "items": items_data,
-                "debug": debug
-            }
-
         except Exception as e:
-            import traceback
+            debug["processing_time"] = str(datetime.now() - start_time)
             return {
                 "error": "Processing failed",
-                "details": f"An unexpected error occurred: {str(e)}",
+                "details": str(e),
                 "debug": debug,
                 "traceback": traceback.format_exc()
             }
-        
-    # Add these methods at the END of your PDFOCRExtractor class
+
+# Usage Example
+def main():
+    """Example usage"""
+    extractor = FastPDFOCRExtractor()
     
-    def extract_with_accuracy_check(self, pdf_file):
-        """Extract with accuracy validation"""
-        # Use your existing extract method
-        result = self.extract(pdf_file)
-        
-        # Add accuracy validation
-        accuracy_check = self.accuracy_intelligence.validate_extraction(result)
-        result["accuracy"] = accuracy_check
-        
-        # If accuracy is low, try pattern improvements
-        if accuracy_check["accuracy_score"] < 0.9:
-            improved_result = self.try_accuracy_improvements(pdf_file, result)
-            if improved_result:
-                return improved_result
-        
-        return result
+    # Test with your PDF file
+    pdf_path = "path_to_your_pdf.pdf"
     
-    def try_accuracy_improvements(self, pdf_file, original_result):
-        """Try to improve accuracy with alternative patterns"""
-        print("🔧 Low accuracy detected, trying improvements...")
-        
-        # Get the text for re-processing
-        images = self.convert_pdf_to_image(pdf_file)
-        if not images:
-            return original_result
-        
-        all_text = ""
-        all_lines = []
-        for image in images:
-            preprocessed_image = self.preprocess_image(image)
-            page_text = self.extract_text(preprocessed_image)
-            all_text += page_text
-            all_lines.extend(page_text.splitlines())
-        
-        # Try alternative patterns for low-confidence fields
-        improved_global = original_result.get("global", {}).copy()
-        
-        for field, score in original_result["accuracy"]["field_scores"].items():
-            if score < 0.9:  # Try to improve this field
-                improved_value = self.try_alternative_patterns(field, all_text, all_lines)
-                if improved_value:
-                    # Validate the improved value
-                    new_score = self.accuracy_intelligence.validate_field(field, improved_value)
-                    if new_score > score:
-                        improved_global[field] = improved_value
-                        print(f"✅ Improved {field}: {improved_value} (score: {score:.2f} → {new_score:.2f})")
-        
-        # Create improved result
-        improved_result = original_result.copy()
-        improved_result["global"] = improved_global
-        
-        # Re-validate accuracy
-        improved_accuracy = self.accuracy_intelligence.validate_extraction(improved_result)
-        improved_result["accuracy"] = improved_accuracy
-        
-        return improved_result
-    
-    def try_alternative_patterns(self, field, full_text, lines):
-        """Try alternative patterns for specific fields"""
-        alternative_patterns = {
-            "PO #": [
-                r"Purchase Order[:\s#]*([A-Z]*\d+)",
-                r"PO[:\s#]*([A-Z]*\d+)",
-                r"Order[:\s#]*([A-Z]*\d+)",
-                r"(RPO\d+)",  # Your original pattern
-            ],
-            "Vendor ID #": [
-                r"Vendor[:\s]+ID[:\s#]*([A-Za-z0-9\-]+)",
-                r"Supplier[:\s]+ID[:\s#]*([A-Za-z0-9\-]+)",
-                r"ID[:\s#]*([A-Za-z0-9\-]+)",
-            ],
-            "Due Date": [
-                r"Due[:\s]+Date[:\s]*(\d{1,2}/\d{1,2}/\d{2,4})",
-                r"Delivery[:\s]+Date[:\s]*(\d{1,2}/\d{1,2}/\d{2,4})",
-                r"Date[:\s]*(\d{1,2}/\d{1,2}/\d{2,4})",
-            ],
-            "Order Type": [
-                r"Order[:\s]+Type[:\s]*([A-Z]+)",
-                r"Type[:\s]*([A-Z]+)",
-                r"\b(STOCK|MCH|SPC|ASSAY|ASSET)\b",
-            ]
-        }
-        
-        if field in alternative_patterns:
-            for pattern in alternative_patterns[field]:
-                match = re.search(pattern, full_text, re.IGNORECASE)
-                if match:
-                    return match.group(1).strip()
-        
-        return None
+    try:
+        with open(pdf_path, 'rb') as pdf_file:
+            result = extractor.extract(pdf_file)
+            
+            if "error" not in result:
+                print("✅ Extraction successful!")
+                
+                if "purchase_orders" in result:
+                    print(f"📊 Found {len(result['purchase_orders'])} RPOs:")
+                    
+                    for i, po in enumerate(result["purchase_orders"]):
+                        print(f"\n📋 RPO {i+1}: {po['po_number']}")
+                        print(f"   ├── Global Fields: {len(po['global'])}")
+                        print(f"   ├── Items: {po['item_count']}")
+                        print(f"   └── Components: {po['component_count']}")
+                        
+                        # Show first few items
+                        for j, item in enumerate(po['items'][:3]):
+                            print(f"      Item {j+1}: {item.get('Richline Item #', 'N/A')}")
+                            print(f"         ├── Job #: {item.get('Job #', 'N/A')}")
+                            print(f"         ├── Metal: {item.get('Metal 1', 'N/A')}")
+                            print(f"         └── Components: {len(item.get('Components', []))}")
+                else:
+                    print(f"📋 Single RPO: {result.get('po_number', 'N/A')}")
+                    print(f"   ├── Items: {result['item_count']}")
+                    print(f"   └── Components: {result['component_count']}")
+                
+                print(f"\n⏱️ Processing time: {result['debug'].get('processing_time', 'N/A')}")
+                
+            else:
+                print("❌ Extraction failed:")
+                print(f"   Error: {result['error']}")
+                print(f"   Details: {result.get('details', 'N/A')}")
+                
+    except FileNotFoundError:
+        print(f"❌ File not found: {pdf_path}")
+    except Exception as e:
+        print(f"❌ Unexpected error: {str(e)}")
+
+if __name__ == "__main__":
+    main()

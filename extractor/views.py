@@ -10,7 +10,7 @@ from datetime import datetime, timedelta
 from io import BytesIO
 
 # Make sure to import the correct class name
-from .extractor import FastPDFOCRExtractor
+from .extractor import HybridPDFOCRExtractor as FastPDFOCRExtractor
 
 ### REFACTORED ###
 # This function now iterates through multiple Purchase Orders
@@ -145,7 +145,7 @@ def upload_pdf(request):
             pdf_file = request.FILES['pdf_file']
             
             extractor = FastPDFOCRExtractor()
-            result = extractor.extract(pdf_file)
+            result = extractor.extract_with_adaptive_quality(pdf_file)
             
             if "error" in result:
                 context = {

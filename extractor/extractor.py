@@ -22,7 +22,7 @@ class AccuracyIntelligence:
         self.field_accuracy = {}
         self.extraction_history = []
         self.accuracy_patterns = {}
-    
+
     def validate_extraction(self, result):
         validation = {
             "accuracy_score": 0,
@@ -30,7 +30,7 @@ class AccuracyIntelligence:
             "issues": [],
             "suggestions": []
         }
-        
+
         # Handle both single and multiple RPO structures
         if "purchase_orders" in result:
             # Multiple RPOs
@@ -43,19 +43,19 @@ class AccuracyIntelligence:
         else:
             # Single RPO
             global_data = result.get("global", {})
-            validation["field_scores"] = {field: self.validate_field(field, value) 
-                                        for field, value in global_data.items()}
+            validation["field_scores"] = {field: self.validate_field(field, value)
+                                          for field, value in global_data.items()}
             all_scores = list(validation["field_scores"].values())
-        
+
         if all_scores:
             validation["accuracy_score"] = sum(all_scores) / len(all_scores)
-        
+
         return validation
-    
+
     def validate_field(self, field_name, field_value):
         if not field_value:
             return 0.0
-        
+
         validators = {
             "PO #": lambda x: 1.0 if re.match(r'^RPO\d+$', str(x)) else 0.3,
             "Vendor ID #": lambda x: 1.0 if 3 <= len(str(x)) <= 20 else 0.5,
@@ -67,11 +67,11 @@ class AccuracyIntelligence:
             "Vendor Name": lambda x: 1.0 if len(str(x)) >= 5 else 0.6,
             "Location": lambda x: 1.0 if len(str(x)) >= 2 else 0.4
         }
-        
+
         if field_name in validators:
             return validators[field_name](field_value)
         return 0.8
-    
+
     def validate_rate(self, rate_value, min_val, max_val):
         try:
             rate = float(str(rate_value).replace(',', ''))
@@ -89,41 +89,41 @@ class HybridPDFOCRExtractor:
         }
         self.job_pattern = r"(RFP\d{6,}|RSET\d{6,})"
         self.accuracy_intelligence = AccuracyIntelligence()
-        
+
         # Processing parameters
         self.fast_dpi = 200
         self.accurate_dpi = 300
         self.max_workers = 4
-        
+
         # Expected fields for consistency
         self.GLOBAL_FIELDS = [
-            "PO #", "PO Date", "Location", "Vendor ID #", "Vendor Name", 
+            "PO #", "PO Date", "Location", "Vendor ID #", "Vendor Name",
             "Due Date", "Order Type", "Gold Rate", "Silver Rate", "Platinum Rate"
         ]
-        
+
         self.ITEM_FIELDS = [
             "Richline Item #", "Vendor Item #", "Job #", "Metal 1", "Metal 2",
-            "Stone PC", "Labor PC", "Diamond TW", "Fin Weight (Gold)", 
-            "Fin Weight (Silver)", "Loss % (Gold)", "Loss % (Silver)", 
+            "Stone PC", "Labor PC", "Diamond TW", "Fin Weight (Gold)",
+            "Fin Weight (Silver)", "Loss % (Gold)", "Loss % (Silver)",
             "Pieces/Carats", "Ext. Gross Wt."
         ]
 
     # ===============================
     # MAIN ENTRY POINTS (All lead to the same extraction logic)
     # ===============================
-    
+
     def extract(self, pdf_file):
         """Main extract method for backward compatibility"""
         return self.extract_with_adaptive_quality(pdf_file)
-    
+
     def extract_from_pdf(self, pdf_file):
         """Alternative method name"""
         return self.extract_with_adaptive_quality(pdf_file)
-    
+
     def process_pdf(self, pdf_file):
         """Another alternative method name"""
         return self.extract_with_adaptive_quality(pdf_file)
-    
+
     def extract_data(self, pdf_file):
         """Another common method name"""
         return self.extract_with_adaptive_quality(pdf_file)
@@ -132,28 +132,28 @@ class HybridPDFOCRExtractor:
         """Enhanced main extraction method using state machine for better accuracy"""
         start_time = datetime.now()
         debug = {"processing_steps": []}
-        
+
         try:
             # Try enhanced state machine approach first
             debug["processing_steps"].append("Starting enhanced state machine extraction...")
             result = self.extract_with_state_machine_internal(pdf_file, debug)
-            
+
             if "error" in result:
                 # Fallback to original method if state machine fails
                 debug["processing_steps"].append("State machine failed, falling back to original method...")
                 result = self._extract_fast(pdf_file, debug)
-            
+
             if "error" not in result:
                 # Validate accuracy
                 accuracy_check = self.accuracy_intelligence.validate_extraction(result)
                 result["accuracy"] = accuracy_check
                 debug["processing_steps"].append(f"Extraction accuracy: {accuracy_check['accuracy_score']:.2f}")
-            
+
             debug["processing_time"] = str(datetime.now() - start_time)
             result["debug"] = debug
-            
+
             return result
-            
+
         except Exception as e:
             debug["processing_time"] = str(datetime.now() - start_time)
             return {
@@ -171,7 +171,7 @@ class HybridPDFOCRExtractor:
         """Convert PDF to images"""
         poppler_path = r"C:\Users\Samuel Aaron\Documents\Release-24.08.0-0\poppler-24.08.0\Library\bin"
         try:
-            pdf_file.seek(0)        
+            pdf_file.seek(0)
             images = pdf2image.convert_from_bytes(
                 pdf_file.read(),
                 dpi=dpi,
@@ -189,10 +189,10 @@ class HybridPDFOCRExtractor:
         try:
             open_cv_image = cv2.cvtColor(np.array(image), cv2.COLOR_RGB2BGR)
             gray = cv2.cvtColor(open_cv_image, cv2.COLOR_BGR2GRAY)
-            
+
             if enhanced:
                 gray = cv2.fastNlMeansDenoising(gray, h=10)
-                
+
             _, thresh = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
             return Image.fromarray(thresh)
         except Exception as e:
@@ -226,13 +226,13 @@ class HybridPDFOCRExtractor:
         all_text = ""
         all_lines = []
         text_with_coords = []
-        
+
         for page_num, image in enumerate(images):
             try:
                 # Get text with bounding boxes
                 data = pytesseract.image_to_data(image, output_type=pytesseract.Output.DICT)
                 page_text = pytesseract.image_to_string(image)
-                
+
                 # Store coordinate information
                 for i in range(len(data['text'])):
                     if data['text'][i].strip():
@@ -244,17 +244,17 @@ class HybridPDFOCRExtractor:
                             'height': data['height'][i],
                             'page': page_num
                         })
-                
+
                 all_text += f"\n#page {page_num + 1}\n" + page_text
                 all_lines.extend(page_text.splitlines())
-                
+
             except Exception as e:
                 print(f"Error processing page {page_num}: {e}")
                 # Fallback to simple text extraction
                 page_text = pytesseract.image_to_string(image)
                 all_text += f"\n#page {page_num + 1}\n" + page_text
                 all_lines.extend(page_text.splitlines())
-                
+
         return all_text, all_lines, text_with_coords
 
     # ===============================
@@ -268,24 +268,24 @@ class HybridPDFOCRExtractor:
             images = self.convert_pdf_to_image(pdf_file, dpi=self.accurate_dpi)
             if not images:
                 return {"error": "Failed to convert PDF to images"}
-            
+
             all_text, all_lines, text_with_coords = self.extract_text_with_coordinates(images)
             debug["processing_steps"].append(f"Extracted text from {len(images)} pages")
-            
+
             # Step 2: Split into RPO blocks using state machine
             rpo_blocks = self.split_into_rpo_blocks(all_lines, debug)
             debug["processing_steps"].append(f"Found {len(rpo_blocks)} RPO blocks")
-            
+
             # Step 3: Process each RPO block
             processed_rpos = []
             for rpo_block in rpo_blocks:
                 rpo_result = self.process_rpo_block(rpo_block, all_lines, text_with_coords, debug)
                 if rpo_result:
                     processed_rpos.append(rpo_result)
-            
+
             # Step 4: Format final result
             return self.format_final_result(processed_rpos, debug)
-            
+
         except Exception as e:
             return {
                 "error": "State machine processing failed",
@@ -296,7 +296,7 @@ class HybridPDFOCRExtractor:
         """FIXED: Properly detect multiple RPOs"""
         rpo_blocks = []
         rpo_pattern = r'\b(RPO?\d+)\b'  # Added ? to handle RP0915176 vs RPO911481
-        
+
         # Find all RPO occurrences with their line positions
         rpo_occurrences = []
         for i, line in enumerate(all_lines):
@@ -306,16 +306,16 @@ class HybridPDFOCRExtractor:
                 if rpo.upper().startswith('RP0'):
                     rpo = 'RPO' + rpo[3:]  # Convert RP0915176 to RPO915176
                 rpo_occurrences.append((i, rpo.upper()))
-        
+
         # Group by unique RPO numbers
         unique_rpos = {}
         for line_num, rpo in rpo_occurrences:
             if rpo not in unique_rpos:
                 unique_rpos[rpo] = []
             unique_rpos[rpo].append(line_num)
-        
+
         debug.setdefault("state_transitions", []).append(f"Found unique RPOs: {list(unique_rpos.keys())}")
-        
+
         # Create blocks for each unique RPO
         if len(unique_rpos) == 1:
             # Single RPO
@@ -327,21 +327,21 @@ class HybridPDFOCRExtractor:
                 "lines": all_lines
             })
             debug.setdefault("state_transitions", []).append(f"Single RPO detected: {single_rpo}")
-            
+
         elif len(unique_rpos) > 1:
             # Multiple RPOs - create separate blocks
             rpo_list = list(unique_rpos.items())
             rpo_list.sort(key=lambda x: x[1][0])  # Sort by first occurrence
-            
+
             for i, (rpo_number, line_positions) in enumerate(rpo_list):
                 start_line = line_positions[0]  # First occurrence
-                
+
                 # End line is start of next RPO or end of document
                 if i + 1 < len(rpo_list):
                     end_line = rpo_list[i + 1][1][0]  # Start of next RPO
                 else:
                     end_line = len(all_lines)
-                
+
                 rpo_blocks.append({
                     "rpo_number": rpo_number,
                     "start_line": start_line,
@@ -349,7 +349,7 @@ class HybridPDFOCRExtractor:
                     "lines": all_lines[start_line:end_line]
                 })
                 debug.setdefault("state_transitions", []).append(f"Created block for {rpo_number}: lines {start_line}-{end_line}")
-        
+
         else:
             # No RPO found
             rpo_blocks.append({
@@ -359,33 +359,33 @@ class HybridPDFOCRExtractor:
                 "lines": all_lines
             })
             debug.setdefault("state_transitions", []).append("No RPO found - created default")
-        
+
         return rpo_blocks
 
     def process_rpo_block(self, rpo_block, all_lines, text_with_coords, debug):
         """Process a single RPO block"""
         rpo_lines = rpo_block["lines"]
         rpo_text = "\n".join(rpo_lines)
-        
+
         # Pre-populate all global fields
         global_data = {field: "" for field in self.GLOBAL_FIELDS}
         global_data["PO #"] = rpo_block["rpo_number"]
-        
+
         # Extract global data with enhanced patterns and fallbacks
         extracted_global = self.extract_global_data_enhanced(rpo_lines, rpo_text, text_with_coords, debug)
         global_data.update(extracted_global)
-        
+
         # Split RPO block into item blocks
         item_blocks = self.split_rpo_into_item_blocks(rpo_lines, debug)
         debug.setdefault("state_transitions", []).append(f"RPO {rpo_block['rpo_number']}: Found {len(item_blocks)} item blocks")
-        
+
         # Process each item block
         processed_items = []
         for item_block in item_blocks:
             item_result = self.process_item_block(item_block, rpo_block["start_line"], all_lines, text_with_coords, debug)
             if item_result:
                 processed_items.append(item_result)
-        
+
         return {
             "po_number": rpo_block["rpo_number"],
             "global": global_data,
@@ -398,7 +398,7 @@ class HybridPDFOCRExtractor:
         """Split RPO block into item blocks"""
         item_blocks = []
         current_block = {"item_number": None, "start_line": 0, "lines": []}
-        
+
         # Enhanced item patterns
         item_patterns = [
             r'\*\*([A-Z]{2}\d{4}[A-Z0-9]+)\*\*',  # **ITEM**
@@ -406,21 +406,21 @@ class HybridPDFOCRExtractor:
             r'^\s*([A-Z]{2}\d{4}[A-Z0-9]+)\s+',  # ITEM at line start
             r'^\s*([0-9]{5,}[A-Z]{2}[A-Z0-9]*)\s+',  # Numeric-prefix items
         ]
-        
+
         for i, line in enumerate(rpo_lines):
             item_found = False
-            
+
             for pattern in item_patterns:
                 matches = re.finditer(pattern, line)
                 for match in matches:
                     item_number = match.group(1).replace('O', '0').replace('B', '8')
-                    
+
                     # Close previous item block
                     if current_block["item_number"] is not None:
                         current_block["end_line"] = i
                         item_blocks.append(current_block)
                         debug.setdefault("state_transitions", []).append(f"Closed item {current_block['item_number']} at line {i}")
-                    
+
                     # Start new item block
                     current_block = {
                         "item_number": item_number,
@@ -431,19 +431,19 @@ class HybridPDFOCRExtractor:
                     debug.setdefault("state_transitions", []).append(f"Started item {item_number} at line {i}")
                     item_found = True
                     break
-                
+
                 if item_found:
                     break
-            
+
             if not item_found and current_block["item_number"] is not None:
                 current_block["lines"].append(line)
-        
+
         # Close final item block
         if current_block["item_number"] is not None:
             current_block["end_line"] = len(rpo_lines)
             item_blocks.append(current_block)
             debug.setdefault("state_transitions", []).append(f"Closed final item {current_block['item_number']}")
-        
+
         return item_blocks
 
     def process_item_block(self, item_block, global_start_idx, all_lines, text_with_coords, debug):
@@ -452,21 +452,21 @@ class HybridPDFOCRExtractor:
         item = {field: "" for field in self.ITEM_FIELDS}
         item["Richline Item #"] = item_block["item_number"]
         item["Components"] = []
-        
+
         item_lines = item_block["lines"]
         item_text = "\n".join(item_lines)
         item_line = item_block["item_line"]
-        
+
         # Extract item data using enhanced methods
         self.extract_item_data_enhanced(item, item_line, item_text, debug)
-        
+
         # Extract components with cross-page awareness
         item["Components"] = self.extract_components_state_machine(
             item_block, global_start_idx, all_lines, text_with_coords, debug
         )
-        
+
         debug.setdefault("state_transitions", []).append(f"Item {item_block['item_number']}: {len(item['Components'])} components")
-        
+
         return item
 
     # ===============================
@@ -476,24 +476,24 @@ class HybridPDFOCRExtractor:
     def extract_global_data_enhanced(self, rpo_lines, rpo_text, text_with_coords, debug):
         """Enhanced global data extraction with fallbacks"""
         global_data = {}
-        
+
         # Location extraction
         location = self.extract_location_enhanced(rpo_lines, rpo_text, text_with_coords)
         if location:
             global_data["Location"] = location
-        
+
         # Vendor extraction with enhanced multi-line support
         vendor_data = self.extract_vendor_data_enhanced(rpo_lines, rpo_text, text_with_coords)
         global_data.update(vendor_data)
-        
+
         # Metal rates with positional fallback
         rates = self.extract_metal_rates_enhanced(rpo_lines, rpo_text, text_with_coords)
         global_data.update(rates)
-        
+
         # Other fields with original patterns
         other_fields = self.extract_other_global_fields(rpo_text)
         global_data.update(other_fields)
-        
+
         return global_data
 
     def extract_location_enhanced(self, rpo_lines, rpo_text, text_with_coords):
@@ -505,34 +505,34 @@ class HybridPDFOCRExtractor:
             r"Ship\s+To[:\s]*.*?([A-Z]{3,4})",
             r"\b([A-Z]{3,4})\s+(?:WAREHOUSE|LOCATION|FACILITY)",
         ]
-        
+
         for pattern in location_patterns:
             match = re.search(pattern, rpo_text, re.IGNORECASE | re.MULTILINE)
             if match:
                 location = match.group(1).strip().upper()
                 if len(location) >= 2 and location not in ['THE', 'AND', 'FOR', 'YOU', 'ARE', 'TEL', 'FAX', 'PO']:
                     return location
-        
+
         # Positional fallback using coordinates if available
         if text_with_coords:
             for coord_data in text_with_coords:
                 if (coord_data['y'] < 500 and  # Top area of page
                     re.match(r'^[A-Z]{3,4}$', coord_data['text']) and
-                    coord_data['text'] not in ['THE', 'AND', 'FOR', 'YOU', 'ARE']):
+                        coord_data['text'] not in ['THE', 'AND', 'FOR', 'YOU', 'ARE']):
                     return coord_data['text']
-        
+
         return None
 
     def extract_vendor_data_enhanced(self, rpo_lines, rpo_text, text_with_coords):
         """Enhanced vendor extraction"""
         vendor_data = {}
-        
+
         # Find Vendor ID line
         vendor_id_line_idx = None
         for i, line in enumerate(rpo_lines):
             if re.search(r"Vendor\s+ID", line, re.IGNORECASE):
                 vendor_id_line_idx = i
-                
+
                 # Extract Vendor ID
                 vendor_id_match = re.search(r"Vendor\s+ID\s*[:#]?\s*([A-Za-z0-9-]+)", line, re.IGNORECASE)
                 if vendor_id_match:
@@ -542,7 +542,7 @@ class HybridPDFOCRExtractor:
                     if next_line and len(next_line) < 30 and re.match(r'^[A-Za-z0-9-]+$', next_line):
                         vendor_data["Vendor ID #"] = next_line
                 break
-        
+
         # Enhanced vendor name extraction
         if vendor_id_line_idx is not None:
             vendor_name_parts = []
@@ -551,16 +551,16 @@ class HybridPDFOCRExtractor:
                 "SUPPLY", "CERT", "SEND", "POLICY", "DUE", "TO:", "UNIT", "VENDOR", "TEL", "FAX",
                 "PHONE", "ADDRESS", "ZIP", "EMAIL"
             ]
-            
+
             # Look through more lines for vendor name (up to 30 lines)
             for j in range(1, 30):
                 if vendor_id_line_idx + j >= len(rpo_lines):
                     break
-                    
+
                 possible_name = rpo_lines[vendor_id_line_idx + j].strip()
                 if not possible_name or len(possible_name) < 2:
                     continue
-                
+
                 # Enhanced skip logic
                 if any(possible_name.upper().startswith(word) for word in skip_keywords):
                     break
@@ -572,31 +572,31 @@ class HybridPDFOCRExtractor:
                     continue
                 if re.match(r'^[A-Z]{2}\d{4}', possible_name):  # Skip item numbers
                     break
-                
+
                 # Handle "Ship To:" cases
                 if re.match(r'^Ship\s+To:', possible_name, re.IGNORECASE):
                     break
-                    
+
                 if "To:" in possible_name:
                     before_to = possible_name.split("To:")[0].strip()
                     if before_to and not before_to.upper().startswith("SHIP"):
                         vendor_name_parts.append(before_to)
                     break
-                
+
                 # Add to vendor name if it looks like a company name
                 if not possible_name.upper().startswith("SHIP"):
                     # Additional validation for company names
-                    if (len(possible_name) > 3 and 
+                    if (len(possible_name) > 3 and
                         not re.match(r'^\d+[\d\.\s]*$', possible_name) and  # Not just numbers
                         not possible_name.upper() in ["DUE", "DATE", "ORDER", "TYPE"] and
-                        not re.match(r'^[A-Z]{1,3}$', possible_name)):  # Not short codes
+                            not re.match(r'^[A-Z]{1,3}$', possible_name)):  # Not short codes
                         vendor_name_parts.append(possible_name)
-                
+
                 # Stop at company indicators or obvious non-vendor content
                 if (re.search(r'\b(LTD|LIMITED|INC|CORP|CORPORATION|PVT\.?\s*LTD|LLC)\b', possible_name, re.IGNORECASE) or
-                    re.search(r'\b(TERMS|CONDITIONS|PAYMENT|DUE|DAYS)\b', possible_name, re.IGNORECASE)):
+                        re.search(r'\b(TERMS|CONDITIONS|PAYMENT|DUE|DAYS)\b', possible_name, re.IGNORECASE)):
                     break
-            
+
             if vendor_name_parts:
                 vendor_full = " ".join(vendor_name_parts)
                 # Clean up vendor name
@@ -604,7 +604,7 @@ class HybridPDFOCRExtractor:
                     r"(.+?(?:LTD|LIMITED|INC|CORP|CORPORATION|PVT\.?\s*LTD|LLC)\.?)",
                     r"(.+)"
                 ]
-                
+
                 for pattern in vendor_patterns:
                     match = re.search(pattern, vendor_full, re.IGNORECASE)
                     if match:
@@ -614,13 +614,13 @@ class HybridPDFOCRExtractor:
                         if len(vendor_name) > 3:  # Minimum length check
                             vendor_data["Vendor Name"] = vendor_name
                         break
-        
+
         return vendor_data
 
     def extract_metal_rates_enhanced(self, rpo_lines, rpo_text, text_with_coords):
         """Enhanced metal rates extraction"""
         rates = {}
-        
+
         # Enhanced rate patterns
         rate_patterns = [
             r"Order Type\s+Gold\s+Platinum\s+Silver\s*\n.*?\b[A-Z]+\b\s+([\d,]+\.?\d*)\s+([\d,]+\.?\d*)\s+([\d,]+\.?\d*)",
@@ -629,7 +629,7 @@ class HybridPDFOCRExtractor:
             r"Gold\s*[:\s]*([\d,]+\.?\d*)\s*Platinum\s*[:\s]*([\d,]+\.?\d*)\s*Silver\s*[:\s]*([\d,]+\.?\d*)",
             r"(?:STOCK|MCH|SPC)\s+([\d,]+\.?\d*)\s+([\d,]+\.?\d*)\s+([\d,]+\.?\d*)",
         ]
-        
+
         for pattern in rate_patterns:
             rate_match = re.search(pattern, rpo_text, re.IGNORECASE | re.MULTILINE)
             if rate_match:
@@ -637,20 +637,65 @@ class HybridPDFOCRExtractor:
                 rates["Platinum Rate"] = rate_match.group(2).replace(',', '')
                 rates["Silver Rate"] = rate_match.group(3).replace(',', '')
                 break
-        
+
         return rates
 
+    def extract_order_type_enhanced(self, rpo_text):
+        """ENHANCED: Better order type detection"""
+
+        # Extended order types list
+        order_types = [
+            "STOCK", "MCH", "SPC", "ASSAY", "ASSET", "ASSETKM-AD", "CHARGEBACK",
+            "CONFONLY", "CORRECT", "DNP", "DOTCOM", "DOTCOMB", "EXTEND",
+            "FL-RECIEVE", "IGI", "MANUAL", "MC", "MCH-REV", "MST", "NEW-CLR",
+            "PCM", "PKG", "PSAMPLE", "REP", "RMC", "RPR", "RTV", "SGI", "SHW",
+            "SLD", "SLDSPC", "SMG", "SMP", "SMPGEM", "SPO-BUILD", "SUPPLY", "TST"
+        ]
+
+        # Enhanced patterns with more context
+        order_type_patterns = [
+            # Pattern 1: In metal rates table
+            r"Order\s+Type\s+Gold\s+Platinum\s+Silver\s*\n.*?\b(" + "|".join(order_types) + r")\b",
+            # Pattern 2: With rates following
+            r"\b(" + "|".join(order_types) + r")\s+[\d,]+\.?\d*\s+[\d,]+\.?\d*\s+[\d,]+\.?\d*",
+            # Pattern 3: Terms order type format
+            r"Terms\s+Order\s+Type\s+.*?\n.*?\b(" + "|".join(order_types) + r")\b",
+            # Pattern 4: Standalone with context
+            r"(?:Order\s+Type|Type)[:\s]*(" + "|".join(order_types) + r")\b",
+            # Pattern 5: In table format
+            r"(?:Terms|Payment).*?(" + "|".join(order_types) + r")\b",
+            # Pattern 6: Near ALL MDSE
+            r"\b(" + "|".join(order_types) + r")\b.*?ALL\s+MDSE",
+            # Pattern 7: Fallback - any order type found
+            r"\b(" + "|".join(order_types) + r")\b"
+        ]
+
+        for pattern in order_type_patterns:
+            match = re.search(pattern, rpo_text, re.IGNORECASE | re.MULTILINE)
+            if match:
+                # Check all groups and find the valid order type
+                for group in match.groups():
+                    if group and group.upper() in order_types:
+                        return group.upper()
+
+        return ""
+
     def extract_other_global_fields(self, rpo_text):
-        """Extract other global fields"""
+        """Extract other global fields - ENHANCED"""
         fields = {}
-        
-        # Due Date patterns
+
+        # Enhanced Order Type extraction
+        order_type = self.extract_order_type_enhanced(rpo_text)
+        if order_type:
+            fields["Order Type"] = order_type
+
+        # Due Date patterns (keep existing)
         due_date_patterns = [
             r"Due Date[:\s]*([A-Za-z]+ \d{1,2},?\s+\d{4})",
             r"Due Date[:\s]*(\d{1,2}/\d{1,2}/\d{2,4})",
             r"\b(January \d{1,2},?\s+\d{4}|February \d{1,2},?\s+\d{4}|March \d{1,2},?\s+\d{4}|April \d{1,2},?\s+\d{4}|May \d{1,2},?\s+\d{4}|June \d{1,2},?\s+\d{4}|July \d{1,2},?\s+\d{4}|August \d{1,2},?\s+\d{4}|September \d{1,2},?\s+\d{4}|October \d{1,2},?\s+\d{4}|November \d{1,2},?\s+\d{4}|December \d{1,2},?\s+\d{4})\b"
         ]
-        
+
         for pattern in due_date_patterns:
             match = re.search(pattern, rpo_text, re.IGNORECASE)
             if match:
@@ -658,37 +703,12 @@ class HybridPDFOCRExtractor:
                 due_date = re.sub(r'\s+', ' ', due_date).strip()
                 fields["Due Date"] = due_date
                 break
-        
-        # Order Type
-        order_types = [
-            "STOCK", "MCH", "SPC", "ASSAY", "ASSET", "ASSETKM-AD", "CHARGEBACK", "CONFONLY", "CORRECT", "DNP",
-            "DOTCOM", "DOTCOMB", "EXTEND", "FL-RECIEVE", "IGI", "MANUAL", "MC", "MCH-REV", "MST", "NEW-CLR",
-            "PCM", "PKG", "PSAMPLE", "REP", "RMC", "RPR", "RTV", "SGI", "SHW", "SLD", "SLDSPC", "SMG", "SMP",
-            "SMPGEM", "SPO-BUILD", "SUPPLY", "TST"
-        ]
-        
-        order_type_patterns = [
-            r"Order Type\s+Gold\s+Platinum\s+Silver\s*\n.*?\b(" + "|".join(order_types) + r")\b",
-            r"\b(" + "|".join(order_types) + r")\s+[\d,]+\.?\d*\s+[\d,]+\.?\d*\s+[\d,]+\.?\d*",
-            r"Terms\s+Order Type\s+Gold\s+Platinum\s+Silver\s*\n.*?\b(" + "|".join(order_types) + r")\b"
-        ]
-        
-        for pattern in order_type_patterns:
-            match = re.search(pattern, rpo_text, re.IGNORECASE | re.MULTILINE)
-            if match:
-                groups = match.groups()
-                for group in reversed(groups):
-                    if group and group.upper() in order_types:
-                        fields["Order Type"] = group.upper()
-                        break
-                if "Order Type" in fields:
-                    break
-        
-        # PO Date
+
+        # PO Date (keep existing)
         po_date_match = re.search(r"\b(\d{2}/\d{2}/\d{2,4})\b", rpo_text)
         if po_date_match:
             fields["PO Date"] = po_date_match.group(1)
-        
+
         return fields
 
     # ===============================
@@ -701,7 +721,7 @@ class HybridPDFOCRExtractor:
         vendor_item = self.extract_vendor_item_enhanced(item_line, item_text)
         if vendor_item and vendor_item != item["Richline Item #"]:
             item["Vendor Item #"] = vendor_item
-        
+
         # Job number extraction
         job_patterns = [r"(RFP\s*\d{6,})", r"(RSET\s*\d{6,})"]
         for pattern in job_patterns:
@@ -709,17 +729,17 @@ class HybridPDFOCRExtractor:
             if match:
                 item["Job #"] = match.group(1).replace(" ", "")
                 break
-        
+
         # Metal extraction
         metal1, metal2 = self.extract_metal_from_description_fixed(item_line)
         if metal1:
             item["Metal 1"] = metal1
         if metal2:
             item["Metal 2"] = metal2
-        
+
         # Financial data
         self.extract_item_financial_data_enhanced(item, item_text)
-        
+
         # Technical data
         self.extract_item_technical_data(item, item_text)
 
@@ -734,7 +754,7 @@ class HybridPDFOCRExtractor:
             match = re.search(item_vendor_pattern, item_text)
             if match:
                 return match.group(1)
-            
+
             # Pattern 2: Extract from item line
             richline_match = re.search(r'^([A-Z0-9]+)', item_line)
             if richline_match:
@@ -754,16 +774,16 @@ class HybridPDFOCRExtractor:
                             return potential_vendor
                         elif 5 <= len(potential_vendor) <= 15 and '-' in potential_vendor:
                             return potential_vendor
-                        
+
                     if re.match(r'^[A-Z0-9]+$', line):
                         if len(line) < len(richline_item):
                             if richline_item.startswith(line):
                                 return line
                             elif 5 <= len(line) <= 15:
                                 return line
-            
+
             return None
-        
+
         except Exception as e:
             return None
 
@@ -771,17 +791,17 @@ class HybridPDFOCRExtractor:
         """Metal extraction from description"""
         if not description:
             return None, None
-        
+
         valid_metals = [
-            '10K', '10KA', '10KB', '10KC', '10KD', '10KE', '10KF', '10KG', '10KH', '10KI', '10KJ', '10KK', 
-            '10KL', '10KM', '10KN', '10KO', '10KP', '10KR', '10KS', '10KT', '10KW', '10KX', '10KY', 
-            '14K', '14KA', '14KB', '14KC', '14KD', '14KE', '14KF', '14KG', '14KH', '14KI', '14KJ', '14KK', 
-            '14KL', '14KM', '14KN', '14KO', '14KP', '14KR', '14KS', '14KT', '14KW', '14KX', '14KY', 
-            '18K', '18KA', '18KB', '18KC', '18KD', '18KE', '18KF', '18KG', '18KH', '18KI', '18KJ', '18KK', 
-            '18KL', '18KM', '18KN', '18KO', '18KP', '18KR', '18KS', '18KT', '18KW', '18KX', '18KY', 
+            '10K', '10KA', '10KB', '10KC', '10KD', '10KE', '10KF', '10KG', '10KH', '10KI', '10KJ', '10KK',
+            '10KL', '10KM', '10KN', '10KO', '10KP', '10KR', '10KS', '10KT', '10KW', '10KX', '10KY',
+            '14K', '14KA', '14KB', '14KC', '14KD', '14KE', '14KF', '14KG', '14KH', '14KI', '14KJ', '14KK',
+            '14KL', '14KM', '14KN', '14KO', '14KP', '14KR', '14KS', '14KT', '14KW', '14KX', '14KY',
+            '18K', '18KA', '18KB', '18KC', '18KD', '18KE', '18KF', '18KG', '18KH', '18KI', '18KJ', '18KK',
+            '18KL', '18KM', '18KN', '18KO', '18KP', '18KR', '18KS', '18KT', '18KW', '18KX', '18KY',
             'SS', 'SILVER', 'GOLD', 'GOS', 'BRASS', 'BRONZE'
         ]
-        
+
         description_upper = description.upper()
 
         # Check for bimetal patterns first
@@ -793,14 +813,14 @@ class HybridPDFOCRExtractor:
             r'\b(SS)\s+.*?\b(10KY|10KW|10KR|14KY|14KW|14KR|18KY|18KW|18KR)\b',
             r'\b(10KY|10KW|10KR|14KY|14KW|14KR|18KY|18KW|18KR)\s+.*?\b(SS)\b',
         ]
-        
+
         for pattern in bimetal_patterns:
             match = re.search(pattern, description_upper)
             if match:
                 metal1, metal2 = match.groups()
                 if metal1 in valid_metals and metal2 in valid_metals:
                     return metal1, metal2
-            
+
         # Find single metals
         found_metals = []
         for metal in valid_metals:
@@ -819,15 +839,15 @@ class HybridPDFOCRExtractor:
             return found_metals[0], found_metals[1]
         elif len(found_metals) == 1:
             return found_metals[0], None
-        
+
         return None, None
 
     def extract_item_financial_data_enhanced(self, item, item_text):
         """Financial data extraction"""
         # Stone PC patterns including asterisk patterns
         stone_patterns = [
-            r'Stone PC[:\s]+(\d+\.\d+)', 
-            r'Stone\s+Labor[:\s]+(\d+\.\d+)', 
+            r'Stone PC[:\s]+(\d+\.\d+)',
+            r'Stone\s+Labor[:\s]+(\d+\.\d+)',
             r'Stone[:\s]+(\d+\.\d+)(?!\s*CT)',
             r'Stone Labor[:\s]+(\d+\.\d+)',
             r'\*+([0-9.]*)\*+',
@@ -841,15 +861,15 @@ class HybridPDFOCRExtractor:
                 else:
                     item["Stone PC"] = value
                 break
-        
+
         if "Stone PC" not in item:
             asterisk_match = re.search(r'\*{5,}', item_text)
             if asterisk_match:
                 item["Stone PC"] = "***********"
-        
+
         # Labor PC patterns
         labor_patterns = [
-            r'Labor PC[:\s]+(\d+\.\d+)', 
+            r'Labor PC[:\s]+(\d+\.\d+)',
             r'Labor[:\s]+PC[:\s]+(\d+\.\d+)',
             r'PC\s+Labor[:\s]+(\d+\.\d+)',
             r'Labor[:\s]+(\d+\.\d+)(?!\s*CT|GR|EA)',
@@ -860,36 +880,115 @@ class HybridPDFOCRExtractor:
                 item["Labor PC"] = match.group(1)
                 break
 
-    def extract_item_technical_data(self, item, item_text):
-        """Technical data extraction"""
-        # Cast Fin Weight patterns
+    def extract_item_technical_data_enhanced(self, item, item_text):
+        """ENHANCED: Better technical data extraction with more patterns"""
+
+        # CAST Fin Weight - Multiple patterns
         cast_patterns = [
+            # Pattern 1: CAST Fin WT Gold: 12.345 Silver: 6.789
             r'CAST Fin WT[:\s]*Gold[:\s]*(\d+\.\d+)(?:\s*Silver[:\s]*(\d+\.\d+))?',
-            r'CAST Fin Wt[:\s]*Gold[:\s]*(\d+\.\d+)(?:\s*Silver[:\s]*(\d+\.\d+))?',
-            r'Fin WT[:\s]*Gold[:\s]*(\d+\.\d+)(?:\s*Silver[:\s]*(\d+\.\d+))?'
+            # Pattern 2: Fin WT Gold 12.345 Silver 6.789
+            r'Fin WT[:\s]*Gold[:\s]*(\d+\.\d+)(?:\s*Silver[:\s]*(\d+\.\d+))?',
+            # Pattern 3: Gold: 12.345 Silver: 6.789 (in CAST section)
+            r'(?:CAST|Fin).*?Gold[:\s]*(\d+\.\d+).*?Silver[:\s]*(\d+\.\d+)',
+            # Pattern 4: Table format Gold   Silver
+            #                      12.345  6.789
+            r'Gold\s+Silver\s*\n.*?(\d+\.\d+)\s+(\d+\.\d+)',
+            # Pattern 5: Single values
+            r'(?:CAST|Fin).*?(?:Gold|Au)[:\s]*(\d+\.\d+)',
+            r'(?:CAST|Fin).*?(?:Silver|Ag)[:\s]*(\d+\.\d+)'
         ]
+
         for pattern in cast_patterns:
-            match = re.search(pattern, item_text, re.IGNORECASE)
+            match = re.search(pattern, item_text, re.IGNORECASE | re.DOTALL)
             if match:
-                if match.group(1):
-                    item["Fin Weight (Gold)"] = match.group(1)
-                if match.group(2):
-                    item["Fin Weight (Silver)"] = match.group(2)
-                break
-        
-        # Loss percentage patterns
+                groups = match.groups()
+                if len(groups) >= 2 and groups[0] and groups[1]:
+                    # Both gold and silver found
+                    item["Fin Weight (Gold)"] = groups[0]
+                    item["Fin Weight (Silver)"] = groups[1]
+                    break
+                elif groups[0]:
+                    # Only gold found
+                    item["Fin Weight (Gold)"] = groups[0]
+
+        # LOSS % - Enhanced patterns
         loss_patterns = [
+            # Pattern 1: LOSS % Gold: 5.0% Silver: 3.0%
             r'LOSS %[:\s]*Gold[:\s]*(\d+\.\d+)%?(?:\s*Silver[:\s]*(\d+\.\d+)%?)?',
-            r'Loss[:\s]*Gold[:\s]*(\d+\.\d+)%?(?:\s*Silver[:\s]*(\d+\.\d+)%?)?'
+            # Pattern 2: Loss Gold 5.0 Silver 3.0
+            r'Loss[:\s]*Gold[:\s]*(\d+\.\d+)%?(?:\s*Silver[:\s]*(\d+\.\d+)%?)?',
+            # Pattern 3: Table format
+            r'(?:LOSS|Loss).*?Gold.*?Silver\s*\n.*?(\d+\.\d+)%?\s+(\d+\.\d+)%?',
+            # Pattern 4: Individual patterns
+            r'(?:LOSS|Loss).*?(?:Gold|Au)[:\s]*(\d+\.\d+)%?',
+            r'(?:LOSS|Loss).*?(?:Silver|Ag)[:\s]*(\d+\.\d+)%?'
         ]
+
         for pattern in loss_patterns:
+            match = re.search(pattern, item_text, re.IGNORECASE | re.DOTALL)
+            if match:
+                groups = match.groups()
+                if len(groups) >= 2 and groups[0] and groups[1]:
+                    item["Loss % (Gold)"] = f"{groups[0]}%"
+                    item["Loss % (Silver)"] = f"{groups[1]}%"
+                    break
+                elif groups[0]:
+                    item["Loss % (Gold)"] = f"{groups[0]}%"
+
+        # PIECES/CARATS - Enhanced patterns
+        pieces_patterns = [
+            r'Pieces[/\s]*Carats[:\s]*(\d+(?:\.\d+)?)',
+            r'Pieces[:\s]*(\d+(?:\.\d+)?)',
+            r'Carats[:\s]*(\d+(?:\.\d+)?)',
+            r'PC[:\s]*(\d+(?:\.\d+)?)',
+            r'QTY[:\s]*(\d+(?:\.\d+)?)\s*(?:PC|PCS|PIECES)',
+            r'(\d+(?:\.\d+)?)\s*(?:PC|PCS|PIECES)',
+            r'(\d+(?:\.\d+)?)\s*(?:CT|CARATS)'
+        ]
+
+        for pattern in pieces_patterns:
             match = re.search(pattern, item_text, re.IGNORECASE)
             if match:
-                if match.group(1):
-                    item["Loss % (Gold)"] = f"{match.group(1)}%"
-                if match.group(2):
-                    item["Loss % (Silver)"] = f"{match.group(2)}%"
+                item["Pieces/Carats"] = match.group(1)
                 break
+
+        # EXT. GROSS WT. - Enhanced patterns
+        gross_wt_patterns = [
+            r'Ext\.?\s*Gross\s*Wt\.?[:\s]*(\d+\.\d+)(?:\s*GR)?',
+            r'Extended\s*Gross\s*Weight[:\s]*(\d+\.\d+)(?:\s*GR)?',
+            r'Gross\s*Weight[:\s]*(\d+\.\d+)(?:\s*GR)?',
+            r'Total\s*Weight[:\s]*(\d+\.\d+)(?:\s*GR)?',
+            r'Ext\.?\s*Wt\.?[:\s]*(\d+\.\d+)(?:\s*GR)?',
+            # Table format
+            r'(?:Ext|Extended).*?(?:Gross|Weight).*?\n.*?(\d+\.\d+)'
+        ]
+
+        for pattern in gross_wt_patterns:
+            match = re.search(pattern, item_text, re.IGNORECASE)
+            if match:
+                item["Ext. Gross Wt."] = f"{match.group(1)} GR"
+                break
+
+        # DIAMOND TW - Enhanced patterns
+        diamond_patterns = [
+            r'Diamond\s*TW[:\s]*(\d+\.\d+)',
+            r'Diamond\s*Total\s*Weight[:\s]*(\d+\.\d+)',
+            r'DIA\s*TW[:\s]*(\d+\.\d+)',
+            r'Total\s*Diamond[:\s]*(\d+\.\d+)',
+            r'(\d+\.\d+)\s*(?:CT|TW)\s*(?:Diamond|DIA)',
+            r'Diamond[:\s]*(\d+\.\d+)\s*(?:CT|TW)'
+        ]
+
+        for pattern in diamond_patterns:
+            match = re.search(pattern, item_text, re.IGNORECASE)
+            if match:
+                item["Diamond TW"] = match.group(1)
+                break
+
+    def extract_item_technical_data(self, item, item_text):
+        """Technical data extraction - ENHANCED VERSION"""
+        return self.extract_item_technical_data_enhanced(item, item_text)
 
     # ===============================
     # COMPONENT EXTRACTION
@@ -898,24 +997,24 @@ class HybridPDFOCRExtractor:
     def extract_components_state_machine(self, item_block, global_start_idx, all_lines, text_with_coords, debug):
         """FIXED: Enhanced component extraction with better cross-page logic"""
         components = []
-        
+
         # First, try within item block
         components = self.extract_components_from_lines(item_block["lines"])
         if components:
             debug.setdefault("state_transitions", []).append(f"Found {len(components)} components in item block")
             return components
-        
+
         # FIXED: More targeted cross-page search
         item_global_pos = global_start_idx + item_block["start_line"]
-        
+
         # Look for component table within reasonable range
         search_start = max(0, item_global_pos - 10)  # Reduced range
         search_end = min(len(all_lines), item_global_pos + 30)  # Look ahead more
-        
+
         # Find the exact component table for this item
         for i in range(search_start, search_end):
             line = all_lines[i]
-            
+
             # Look for component table header
             if re.search(r'supplied\s+by\s+component', line, re.IGNORECASE):
                 # Found component table, extract from here
@@ -924,28 +1023,28 @@ class HybridPDFOCRExtractor:
                 if components:
                     debug.setdefault("state_transitions", []).append(f"Found {len(components)} components via targeted search")
                     break
-        
+
         return components
 
     def extract_components_from_lines(self, component_lines):
         """FIXED: Better component extraction for your specific format"""
         components = []
         in_component_section = False
-        
+
         for line in component_lines:
             line = line.strip()
             if not line or len(line) < 5:
                 continue
 
             line_lower = line.lower()
-            
+
             # FIXED: Detect component section start
             if (re.search(r'supplied\s+by\s+component', line_lower) or
                 re.search(r'component.*setting.*cost', line_lower) or
-                line_lower.startswith('supplied by')):
+                    line_lower.startswith('supplied by')):
                 in_component_section = True
                 continue
-            
+
             # Stop conditions
             stop_conditions = [
                 "there is a", "market price", "page:", "purchase order",
@@ -953,23 +1052,23 @@ class HybridPDFOCRExtractor:
             ]
             if any(stop in line_lower for stop in stop_conditions):
                 break
-            
+
             # Skip if not in component section yet
             if not in_component_section:
                 continue
-            
+
             # Stop if we hit another item
             if re.search(r'\b[A-Z]{2}\d{4}[A-Z0-9]+\b.*\d+\.\d+.*(EA|PR)', line):
                 break
-                
+
             component = self.parse_component_line_fixed_for_your_format(line)
             if component and component.get("Component"):
                 components.append(component)
-        
+
         return components
 
-    def parse_component_line_fixed_for_your_format(self, line):
-        """FIXED: Parse component lines for your specific OCR format"""
+    def parse_component_line_enhanced_column_detection(self, line):
+        """ENHANCED: Better component parsing with proper column detection"""
         component = {
             "Component": "",
             "Cost ($)": "",
@@ -981,84 +1080,107 @@ class HybridPDFOCRExtractor:
         if not line or len(line) < 5:
             return None
 
-        # Skip obvious non-component lines
+        # Skip headers and separators
         skip_patterns = [
-            r'^\d+\s*$',  # Just numbers
-            r'^setting\s+typ',  # Headers
-            r'^qty\.\s+per',  # Headers
-            r'^ext\.\s+weight',  # Headers
+            r'^[\|\-\s]+$',  # Table separators
+            r'^(?:Component|Cost|Weight|Policy|Setting|Supplied|By)',  # Headers
+            r'^\d+\s*$'  # Just numbers
         ]
-        
+
         for pattern in skip_patterns:
             if re.search(pattern, line, re.IGNORECASE):
                 return None
 
-        # FIXED: Component patterns specific to your OCR
+        # ENHANCED: Component name extraction with priority order
         component_patterns = [
-            # For your format: DIA125, LDSH/.33, PKG05679, etc.
-            r'\b(DIA\d+)\b',
-            r'\b(LDSH/\.\d+)\b',
-            r'\b(PKG\d+)\b', 
-            r'\b(CUN\.UN\.\d+\.\d+)\b',
-            r'\b([A-Z]+\d+[A-Z]*(?:/\.\d+)?)\b',  # General pattern
-            r'\b([A-Z]{2,4}\d{2,6}[A-Z0-9]*)\b',
             # CS patterns - most common
             r'\b(CS[0-9/\.-]+(?:-[A-Z0-9]+)*)', r'\b(CS[A-Z0-9\./\-]+)',
             r'\b(CS\d+/\d+(?:\.\d+)?(?:NV|OV|PS|HS|RDP)-[A-Z0-9]+)',
             r'\b(CS\d+(?:/\d+(?:\.\d+)?)?-[A-Z0-9]+-[A-Z0-9]+)',
-            r'\b(CS\d+(?:/\d+(?:\.\d+)?)?[A-Z]+-[A-Z0-9]+)', 
+            r'\b(CS\d+(?:/\d+(?:\.\d+)?)?[A-Z]+-[A-Z0-9]+)',
             # Other patterns
-            r'\b(THP-WH\d+-[A-Z]+)', r'\b(THP-[A-Z0-9\-]+)', 
-            r'\b([0-9]{2}XX[0-9]{4}-[A-Z0-9]+)', r'\b(SSC[0-9]+[A-Z0-9]*)', 
-            r'\b(PKG[0-9]+)', r'\b(TRC[0-9]+[A-Z0-9]*)', 
+            r'\b(THP-WH\d+-[A-Z]+)', r'\b(THP-[A-Z0-9\-]+)',
+            r'\b([0-9]{2}XX[0-9]{4}-[A-Z0-9]+)', r'\b(SSC[0-9]+[A-Z0-9]*)',
+            r'\b(PKG[0-9]+)', r'\b(TRC[0-9]+[A-Z0-9]*)',
             r'\b(CHR[A-Z0-9]+W?-\d+[A-Z]?)', r'\b(OT-[A-Z0-9]+)',
-            r'\b(OT-CHR\d+-\d+)', r'\b(OT-[A-Z]+\d*)', 
+            r'\b(OT-CHR\d+-\d+)', r'\b(OT-[A-Z]+\d*)',
             r'\b(R[0-9]{3}-[0-9]+[A-Z\-]*)', r'\b(CN\d{4}-[A-Z0-9]+-\d+)',
-            r'\b(CN[0-9]{4}-[A-Z0-9\-]+)', r'\b(MS\d{4}-[A-Z0-9]+)', 
+            r'\b(CN[0-9]{4}-[A-Z0-9\-]+)', r'\b(MS\d{4}-[A-Z0-9]+)',
             r'\b(MS[0-9]{4}-[A-Z0-9]+)', r'\b(A\d+/\.\d+)',
             r'\b(A[0-9]+/\.[0-9]+)', r'\b(CHSBOXIML-\d+)',
-            r'\b(CHS[A-Z]+ML-\d+)', r'\b(LD[A-Z]*[0-9]+[A-Z]*[/\.][0-9\.]+)', 
-            r'\b(LD[A-Z]*[0-9]+/[0-9\.]+)', r'\b(LD[A-Z0-9\.]+)',   
+            r'\b(CHS[A-Z]+ML-\d+)', r'\b(LD[A-Z]*[0-9]+[A-Z]*[/\.][0-9\.]+)',
+            r'\b(LD[A-Z]*[0-9]+/[0-9\.]+)', r'\b(LD[A-Z0-9\.]+)',
             r'\b(PKG\d+)', r'\b([A-Z]+[\d/.]+)', r'\b(H[0-9]+/[0-9\.]+)',
             r'\b([A-Z]{1,4}\d{1,6}[A-Z0-9\./\-]*)',
             r'\b([A-Z]+\d+[A-Z]*(?:[/\.-][A-Z0-9]+)*)',
-            r'\b([0-9]{4}-[A-Z]+-[A-Z]+)', r'\b([0-9]/[0-9\.]+-[A-Z]+-[A-Z]+)', 
+            r'\b([0-9]{4}-[A-Z]+-[A-Z]+)', r'\b([0-9]/[0-9\.]+-[A-Z]+-[A-Z]+)',
             r'\b([0-9]/[0-9\.]+)', r'\b([0-9]+/[0-9\.]+[A-Z]*-[A-Z0-9]+)',
-            # Fallback
         ]
-        
+
         for pattern in component_patterns:
             match = re.search(pattern, line)
             if match:
                 component["Component"] = match.group(1)
                 break
-        
-        # FIXED: Extract cost and weight - specific to your format
-        # Your format: "90.25 CT", "0.33333 CT", "0.02329 EA"
-        cost_weight_pattern = r'(\d+\.?\d*)\s+(CT|EA|GR)'
-        values = re.findall(cost_weight_pattern, line)
-        
-        if values:
-            # First value is usually cost, second is weight
-            if len(values) >= 1:
-                component["Cost ($)"] = f"{values[0][0]} {values[0][1]}"
-            if len(values) >= 2:
-                component["Tot. Weight"] = f"{values[1][0]} {values[1][1]}"
-            elif len(values) == 1:
-                # Single value - determine by magnitude
-                val = float(values[0][0])
-                if val > 5:  # Likely cost
-                    component["Cost ($)"] = f"{values[0][0]} {values[0][1]}"
-                else:  # Likely weight
-                    component["Tot. Weight"] = f"{values[0][0]} {values[0][1]}"
-        
-        # FIXED: Extract supply policy
-        if re.search(r'by\s+vendor', line, re.IGNORECASE):
-            component["Supply Policy"] = "By Vendor"
-        elif re.search(r'send\s+to', line, re.IGNORECASE):
-            component["Supply Policy"] = "Send To"
-        
+
+        # ENHANCED: Better cost/weight detection using position analysis
+        # Split line into potential columns
+        parts = re.split(r'\s{2,}', line)  # Split on 2+ spaces (column separator)
+
+        # Find numeric values with units
+        numeric_values = []
+        for i, part in enumerate(parts):
+            # Look for patterns like "12.345 CT", "0.123 EA", "45.67 GR"
+            value_matches = re.findall(r'(\d+\.?\d*)\s*(CT|EA|GR|PC)', part, re.IGNORECASE)
+            for value, unit in value_matches:
+                numeric_values.append({
+                    'value': value,
+                    'unit': unit.upper(),
+                    'position': i,
+                    'text': part,
+                    'magnitude': float(value)
+                })
+
+        # ENHANCED: Smart assignment based on context and magnitude
+        if numeric_values:
+            # Sort by position in line (left to right)
+            numeric_values.sort(key=lambda x: x['position'])
+
+            # Assign based on magnitude and context
+            for i, num_val in enumerate(numeric_values):
+                value_str = f"{num_val['value']} {num_val['unit']}"
+
+                # First numeric value or large value (>5) = likely cost
+                if i == 0 or num_val['magnitude'] > 5.0:
+                    if not component["Cost ($)"]:  # Don't overwrite if already set
+                        component["Cost ($)"] = value_str
+
+                # Second numeric value or small value (<5) = likely weight
+                elif i == 1 or num_val['magnitude'] <= 5.0:
+                    if not component["Tot. Weight"]:  # Don't overwrite if already set
+                        component["Tot. Weight"] = value_str
+
+        # ENHANCED: Supply policy detection with more patterns
+        policy_patterns = [
+            (r'by\s+vendor', "By Vendor"),
+            (r'vendor\s+supply', "By Vendor"),
+            (r'send\s+to', "Send To"),
+            (r'richline\s+supply', "Richline"),
+            (r'supply\s+by\s+richline', "Richline"),
+            (r'customer\s+supply', "Customer"),
+            (r'drop\s+ship', "Drop Ship")
+        ]
+
+        for pattern, policy in policy_patterns:
+            if re.search(pattern, line, re.IGNORECASE):
+                component["Supply Policy"] = policy
+                break
+
         return component if component["Component"] else None
+
+    def parse_component_line_fixed_for_your_format(self, line):
+        """ENHANCED: Component line parsing"""
+        return self.parse_component_line_enhanced_column_detection(line)
 
     # ===============================
     # RESULT FORMATTING
@@ -1090,7 +1212,7 @@ class HybridPDFOCRExtractor:
         images = self.convert_pdf_to_image(pdf_file, dpi=self.fast_dpi, use_jpeg=True)
         if not images:
             return {"error": "Failed to convert PDF to images", "debug": debug}
-        
+
         debug["processing_steps"].append(f"PDF converted to {len(images)} images (Fast mode)")
 
         # Parallel OCR processing
@@ -1119,32 +1241,32 @@ class HybridPDFOCRExtractor:
 
         # Process each RPO with its items
         purchase_orders = []
-        
+
         for rpo_number, rpo_items in items_by_rpo.items():
             # Create RPO-specific global data
             rpo_global = global_data.copy()
             rpo_global["PO #"] = rpo_number
-            
+
             # Process items for this RPO
             processed_items = []
-            
+
             for idx, (item_line_idx, item_number, item_line) in enumerate(rpo_items):
                 # Determine item text boundaries
                 next_item_idx = rpo_items[idx + 1][0] if idx + 1 < len(rpo_items) else len(all_lines)
                 item_lines = all_lines[item_line_idx:next_item_idx]
-                
+
                 # Extract complete item data
                 item = self.extract_single_item_enhanced(
-                    item_number, 
-                    item_line, 
+                    item_number,
+                    item_line,
                     item_lines,
                     item_line_idx,
                     all_lines
                 )
-                
+
                 if item:
                     processed_items.append(item)
-            
+
             # Create RPO entry
             rpo_entry = {
                 "po_number": rpo_number,
@@ -1153,7 +1275,7 @@ class HybridPDFOCRExtractor:
                 "item_count": len(processed_items),
                 "component_count": sum(len(item.get("Components", [])) for item in processed_items)
             }
-            
+
             purchase_orders.append(rpo_entry)
             debug["processing_steps"].append(f"Processed RPO {rpo_number}: {len(processed_items)} items")
 
@@ -1173,7 +1295,7 @@ class HybridPDFOCRExtractor:
             r"Location[:\s]*([A-Z]{2,4})\s*$",
             r"Location[:\s]*([A-Z]{2,4})",  # Fallback
         ]
-        
+
         for pattern in location_patterns:
             match = re.search(pattern, full_text, re.IGNORECASE | re.MULTILINE)
             if match:
@@ -1185,11 +1307,11 @@ class HybridPDFOCRExtractor:
         # Original field extraction logic
         first_page_fields = ["PO #", "PO Date"]
         pages = full_text.split('#page')
-    
+
         for field, pattern in self.global_patterns.items():
             if field == "Location":
                 continue  # Already handled above
-                
+
             match_found = False
             if field in first_page_fields and len(pages) > 1:
                 first_page = pages[1] if len(pages) > 1 else full_text
@@ -1197,7 +1319,7 @@ class HybridPDFOCRExtractor:
                 if match:
                     result[field] = match.group(1).replace(",", "")
                     match_found = True
-        
+
             if not match_found:
                 match = re.search(pattern, full_text, re.IGNORECASE)
                 if match:
@@ -1213,7 +1335,7 @@ class HybridPDFOCRExtractor:
             rpo_matches = re.findall(r'RPO\d+', line, re.IGNORECASE)
             for rpo in rpo_matches:
                 rpo_positions.append((i, rpo.upper()))
-        
+
         # Step 2: Find all items with their line positions
         item_patterns = [
             r'\*\*([A-Z]{2}\d{4}[A-Z0-9]+)\*\*',
@@ -1221,7 +1343,7 @@ class HybridPDFOCRExtractor:
             r'^\s*([A-Z]{2}\d{4}[A-Z0-9]+)\s+',
             r'^\s*([0-9]{5,}[A-Z]{2}[A-Z0-9]*)\s+',
         ]
-        
+
         item_positions = []
         for i, line in enumerate(lines):
             for pattern in item_patterns:
@@ -1229,7 +1351,7 @@ class HybridPDFOCRExtractor:
                 for match in matches:
                     item_number = match.group(1).replace('O', '0').replace('B', '8')
                     item_positions.append((i, item_number, line))
-        
+
         # Remove duplicate items
         seen_items = set()
         unique_items = []
@@ -1237,39 +1359,39 @@ class HybridPDFOCRExtractor:
             if pos[1] not in seen_items:
                 seen_items.add(pos[1])
                 unique_items.append(pos)
-        
+
         unique_items.sort(key=lambda x: x[0])
-        
+
         # Step 3: Associate each item with the nearest preceding RPO
         items_by_rpo = {}
-        
+
         for item_line, item_number, item_text in unique_items:
             closest_rpo = None
             closest_distance = float('inf')
-            
+
             for rpo_line, rpo_number in rpo_positions:
                 if rpo_line <= item_line:
                     distance = item_line - rpo_line
                     if distance < closest_distance:
                         closest_distance = distance
                         closest_rpo = rpo_number
-            
+
             if closest_rpo is None and rpo_positions:
                 closest_rpo = rpo_positions[0][1]
-            
+
             if closest_rpo:
                 if closest_rpo not in items_by_rpo:
                     items_by_rpo[closest_rpo] = []
                 items_by_rpo[closest_rpo].append((item_line, item_number, item_text))
-        
+
         return items_by_rpo
 
     def extract_single_item_enhanced(self, item_number, item_line, item_lines, global_start_idx, all_lines):
         """Original item extraction method"""
         item = {"Components": [], "CAST Fin WT": {}, "LOSS %": {},  "Richline Item #": item_number}
-        
+
         item_text = "\n".join(item_lines)
-        
+
         # Extract vendor item
         vendor_item = self.extract_vendor_item_enhanced(item_line, item_text)
         if vendor_item and vendor_item != item_number:
@@ -1300,14 +1422,14 @@ class HybridPDFOCRExtractor:
             item["Metal 1"] = metal1
         if metal2:
             item["Metal 2"] = metal2
-        
+
         # Extract financial, technical, and physical data
         self.extract_item_financial_data_enhanced(item, item_text)
         self.extract_item_technical_data(item, item_text)
-        
+
         # Components extraction
         item["Components"] = self.extract_components_enhanced_fixed(item_lines, global_start_idx, all_lines)
-        
+
         return item
 
     def extract_components_enhanced_fixed(self, item_lines, global_start_idx, all_lines):
@@ -1328,7 +1450,7 @@ class HybridPDFOCRExtractor:
             search_lines = all_lines[start_idx:min(end_idx, len(all_lines))]
 
             component_start = -1
-        
+
             header_patterns = [
                 r'supplied by.*component.*cost',
                 r'^\s*\|\s*Supplied by\s*\|',
@@ -1347,13 +1469,13 @@ class HybridPDFOCRExtractor:
                         break
                 if component_start != -1:
                     break
-        
+
             if component_start != -1:
                 component_lines = search_lines[component_start:component_start + 20]
                 components = self.extract_components_from_lines(component_lines)
                 if components:
                     return components
-            
+
         return components
 
 
@@ -1361,46 +1483,30 @@ class HybridPDFOCRExtractor:
 def main():
     """Example usage with enhanced state machine extractor"""
     extractor = HybridPDFOCRExtractor()
-    
+
     pdf_path = "path_to_your_pdf.pdf"
-    
+
     try:
         with open(pdf_path, 'rb') as pdf_file:
             print("--- Running Standard Extraction ---")
             result = extractor.extract(pdf_file)
-            
+
             if "error" not in result:
                 print("✅ Standard Extraction successful!")
                 print(f"🎯 Accuracy Score: {result.get('accuracy', {}).get('accuracy_score', 'N/A'):.2f}")
+                # Pretty print the result for inspection
+                print(json.dumps(result, indent=2))
             else:
                 print("❌ Extraction failed:", result['error'])
-
-        print("\n" + "="*40 + "\n")
-
-        with open(pdf_path, 'rb') as pdf_file:
-            print("--- Running Fast-Only Extraction ---")
-            fast_result = extractor.extract_fast_only(pdf_file)
-            
-            if "error" not in fast_result:
-                print("✅ Fast-Only Extraction successful!")
-            else:
-                print("❌ Fast extraction failed:", fast_result['error'])
-        
-        print("\n" + "="*40 + "\n")
-
-        with open(pdf_path, 'rb') as pdf_file:
-            print("--- Running Extraction with Timing ---")
-            timed_result = extractor.extract_with_timing(pdf_file)
-            if "error" in timed_result:
-                 print("❌ Timed extraction failed:", timed_result['error'])
-            else:
-                 print("✅ Timed Extraction successful!")
-
+                if 'debug' in result:
+                    print("Debug Info:", json.dumps(result['debug'], indent=2))
 
     except FileNotFoundError:
         print(f"❌ File not found: {pdf_path}")
+        print("Please update the 'pdf_path' variable with a valid PDF file path.")
     except Exception as e:
         print(f"❌ Unexpected error: {str(e)}")
+        traceback.print_exc()
 
 if __name__ == "__main__":
     main()

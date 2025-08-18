@@ -13,7 +13,6 @@ import os
 from pathlib import Path
 import time # Imported for timing
 
-# Set Tesseract path
 pytesseract.pytesseract.tesseract_cmd = r'C:\Users\Samuel Aaron\AppData\Local\Programs\Tesseract-OCR\tesseract.exe'
 
 class AccuracyIntelligence:
@@ -60,7 +59,7 @@ class AccuracyIntelligence:
             "PO #": lambda x: 1.0 if re.match(r'^RPO\d+$', str(x)) else 0.3,
             "Vendor ID #": lambda x: 1.0 if 3 <= len(str(x)) <= 20 else 0.5,
             "Due Date": lambda x: 1.0 if re.match(r'\d{1,2}/\d{1,2}/\d{2,4}', str(x)) else 0.3,
-            "Order Type": lambda x: 1.0 if str(x).upper() in ["STOCK", "MCH", "SPC", "ASSAY", "ASSET"] else 0.4,
+            "Order Type": lambda x: 1.0 if str(x).upper() in ["STOCK", "MCH", "SPC", "ASSAY", "ASSET", "SUPPLY"] else 0.4,
             "Gold Rate": lambda x: self.validate_rate(x, 1500, 3000),
             "Silver Rate": lambda x: self.validate_rate(x, 15, 50),
             "Platinum Rate": lambda x: self.validate_rate(x, 800, 1500),
@@ -109,7 +108,7 @@ class HybridPDFOCRExtractor:
         ]
 
     # ===============================
-    # MAIN ENTRY POINTS (All lead to the same extraction logic)
+    # MAIN ENTRY POINTS
     # ===============================
 
     def extract(self, pdf_file):
@@ -169,13 +168,12 @@ class HybridPDFOCRExtractor:
 
     def convert_pdf_to_image(self, pdf_file, dpi=200, use_jpeg=True):
         """Convert PDF to images"""
-        poppler_path = r"C:\Users\Samuel Aaron\Documents\Release-24.08.0-0\poppler-24.08.0\Library\bin"
         try:
             pdf_file.seek(0)
             images = pdf2image.convert_from_bytes(
                 pdf_file.read(),
                 dpi=dpi,
-                poppler_path=poppler_path,
+                poppler_path = r"C:\Users\Samuel Aaron\Documents\Release-24.08.0-0\poppler-24.08.0\Library\bin",
                 thread_count=self.max_workers,
                 fmt='jpeg' if use_jpeg else 'ppm'
             )
@@ -256,6 +254,21 @@ class HybridPDFOCRExtractor:
                 all_lines.extend(page_text.splitlines())
 
         return all_text, all_lines, text_with_coords
+
+    def extract_text_simple(self, images):
+        """Simple text extraction without coordinates"""
+        all_text = ""
+        all_lines = []
+
+        for page_num, image in enumerate(images):
+            try:
+                page_text = pytesseract.image_to_string(image)
+                all_text += f"\n#page {page_num + 1}\n" + page_text
+                all_lines.extend(page_text.splitlines())
+            except Exception as e:
+                print(f"Error processing page {page_num}: {e}")
+
+        return all_text, all_lines
 
     # ===============================
     # STATE MACHINE EXTRACTION
@@ -470,28 +483,48 @@ class HybridPDFOCRExtractor:
         return item
 
     # ===============================
-    # GLOBAL DATA EXTRACTION
+    # GLOBAL DATA EXTRACTION - FIXED
     # ===============================
 
     def extract_global_data_enhanced(self, rpo_lines, rpo_text, text_with_coords, debug):
-        """Enhanced global data extraction with fallbacks"""
+        """FIXED: Enhanced global data extraction with proper boundaries"""
         global_data = {}
 
+        # CRITICAL FIX: Only extract global data from FIRST 50 lines of RPO
+        # This prevents contamination from item/component sections
+        global_section_lines = rpo_lines[:50]  # Limit scope
+        global_section_text = "\n".join(global_section_lines)
+
+        # Stop global extraction at first item
+        item_start_idx = None
+        for i, line in enumerate(global_section_lines):
+            if re.search(r'\b[A-Z]{2}\d{4}[A-Z0-9]+\b', line):  # Item pattern
+                item_start_idx = i
+                break
+
+        if item_start_idx:
+            # Only use text BEFORE first item for global data
+            safe_global_lines = global_section_lines[:item_start_idx]
+            safe_global_text = "\n".join(safe_global_lines)
+        else:
+            safe_global_lines = global_section_lines
+            safe_global_text = global_section_text
+
         # Location extraction
-        location = self.extract_location_enhanced(rpo_lines, rpo_text, text_with_coords)
+        location = self.extract_location_enhanced(safe_global_lines, safe_global_text, text_with_coords)
         if location:
             global_data["Location"] = location
 
         # Vendor extraction with enhanced multi-line support
-        vendor_data = self.extract_vendor_data_enhanced(rpo_lines, rpo_text, text_with_coords)
+        vendor_data = self.extract_vendor_data_enhanced(safe_global_lines, safe_global_text, text_with_coords)
         global_data.update(vendor_data)
 
         # Metal rates with positional fallback
-        rates = self.extract_metal_rates_enhanced(rpo_lines, rpo_text, text_with_coords)
+        rates = self.extract_metal_rates_enhanced(safe_global_lines, safe_global_text, text_with_coords)
         global_data.update(rates)
 
         # Other fields with original patterns
-        other_fields = self.extract_other_global_fields(rpo_text)
+        other_fields = self.extract_other_global_fields(safe_global_text)
         global_data.update(other_fields)
 
         return global_data
@@ -524,7 +557,7 @@ class HybridPDFOCRExtractor:
         return None
 
     def extract_vendor_data_enhanced(self, rpo_lines, rpo_text, text_with_coords):
-        """Enhanced vendor extraction"""
+        """FIXED: Better vendor extraction with proper boundary detection"""
         vendor_data = {}
 
         # Find Vendor ID line
@@ -543,130 +576,137 @@ class HybridPDFOCRExtractor:
                         vendor_data["Vendor ID #"] = next_line
                 break
 
-        # Enhanced vendor name extraction
+        # FIXED: Enhanced vendor name extraction
         if vendor_id_line_idx is not None:
             vendor_name_parts = []
-            skip_keywords = [
-                "ID", "DATE", "PO", "ORDER", "LOCATION", "RATE", "TYPE", "#", "SHIP", "BILL",
-                "SUPPLY", "CERT", "SEND", "POLICY", "DUE", "TO:", "UNIT", "VENDOR", "TEL", "FAX",
-                "PHONE", "ADDRESS", "ZIP", "EMAIL"
-            ]
-
-            # Look through more lines for vendor name (up to 30 lines)
-            for j in range(1, 30):
+            
+            # Look for vendor name in next 15 lines after Vendor ID
+            for j in range(1, 16):  # Increased range
                 if vendor_id_line_idx + j >= len(rpo_lines):
                     break
-
-                possible_name = rpo_lines[vendor_id_line_idx + j].strip()
-                if not possible_name or len(possible_name) < 2:
+                    
+                line = rpo_lines[vendor_id_line_idx + j].strip()
+                if not line or len(line) < 3:
                     continue
-
-                # Enhanced skip logic
-                if any(possible_name.upper().startswith(word) for word in skip_keywords):
+                
+                # FIXED: Better stop conditions
+                stop_keywords = [
+                    "SHIP TO", "BILL TO", "DUE DATE", "ORDER TYPE", "TERMS",
+                    "GOLD", "SILVER", "PLATINUM", "RATE", "LOCATION",
+                    "PHONE", "FAX", "EMAIL", "ADDRESS", "ZIP", "ITEM NO",
+                    "DESCRIPTION", "UNIT COST", "PIECES"
+                ]
+                
+                # Stop if we hit any stop keyword
+                if any(keyword in line.upper() for keyword in stop_keywords):
                     break
-                if re.match(r'^\d+$', possible_name):  # Skip pure numbers
-                    continue
-                if re.match(r'^\d{5}$', possible_name):  # Skip ZIP codes
-                    continue
-                if ":" in possible_name and len(possible_name.split(":")[0]) < 8:
-                    continue
-                if re.match(r'^[A-Z]{2}\d{4}', possible_name):  # Skip item numbers
+                
+                # Stop if we hit an item number
+                if re.match(r'^[A-Z]{2}\d{4}', line):
                     break
-
-                # Handle "Ship To:" cases
-                if re.match(r'^Ship\s+To:', possible_name, re.IGNORECASE):
+                
+                # Stop if line looks like a table header
+                if re.search(r'Item\s+No|Description|Unit\s+Cost|Pieces', line, re.IGNORECASE):
                     break
-
-                if "To:" in possible_name:
-                    before_to = possible_name.split("To:")[0].strip()
-                    if before_to and not before_to.upper().startswith("SHIP"):
-                        vendor_name_parts.append(before_to)
-                    break
-
-                # Add to vendor name if it looks like a company name
-                if not possible_name.upper().startswith("SHIP"):
-                    # Additional validation for company names
-                    if (len(possible_name) > 3 and
-                        not re.match(r'^\d+[\d\.\s]*$', possible_name) and  # Not just numbers
-                        not possible_name.upper() in ["DUE", "DATE", "ORDER", "TYPE"] and
-                            not re.match(r'^[A-Z]{1,3}$', possible_name)):  # Not short codes
-                        vendor_name_parts.append(possible_name)
-
-                # Stop at company indicators or obvious non-vendor content
-                if (re.search(r'\b(LTD|LIMITED|INC|CORP|CORPORATION|PVT\.?\s*LTD|LLC)\b', possible_name, re.IGNORECASE) or
-                        re.search(r'\b(TERMS|CONDITIONS|PAYMENT|DUE|DAYS)\b', possible_name, re.IGNORECASE)):
-                    break
-
+                
+                # Add to vendor name if it looks valid
+                if (not line.upper().startswith(("SHIP", "BILL", "DUE", "ORDER")) and
+                    not re.match(r'^\d+$', line) and  # Not just numbers
+                    not re.match(r'^[A-Z]{1,3}$', line)):  # Not short codes
+                    
+                    vendor_name_parts.append(line)
+                    
+                    # Stop at company indicators
+                    if re.search(r'\b(LTD|LIMITED|INC|CORP|LLC|PVT)\b', line, re.IGNORECASE):
+                        break
+            
+            # Build vendor name
             if vendor_name_parts:
                 vendor_full = " ".join(vendor_name_parts)
-                # Clean up vendor name
-                vendor_patterns = [
-                    r"(.+?(?:LTD|LIMITED|INC|CORP|CORPORATION|PVT\.?\s*LTD|LLC)\.?)",
-                    r"(.+)"
-                ]
-
-                for pattern in vendor_patterns:
-                    match = re.search(pattern, vendor_full, re.IGNORECASE)
-                    if match:
-                        vendor_name = match.group(1).strip(" .:-")
-                        # Remove common prefixes
-                        vendor_name = re.sub(r'^(Shi\s+|Ship\s+|Vendor\s+)', '', vendor_name, flags=re.IGNORECASE)
-                        if len(vendor_name) > 3:  # Minimum length check
-                            vendor_data["Vendor Name"] = vendor_name
-                        break
+                # Clean up
+                vendor_name = re.sub(r'^(Ship\s+|Vendor\s+)', '', vendor_full, flags=re.IGNORECASE)
+                vendor_name = vendor_name.strip(" .:-")
+                
+                if len(vendor_name) > 3:
+                    vendor_data["Vendor Name"] = vendor_name
 
         return vendor_data
 
     def extract_metal_rates_enhanced(self, rpo_lines, rpo_text, text_with_coords):
-        """Enhanced metal rates extraction"""
+        """FIXED: Better metal rates extraction"""
         rates = {}
 
-        # Enhanced rate patterns
-        rate_patterns = [
-            r"Order Type\s+Gold\s+Platinum\s+Silver\s*\n.*?\b[A-Z]+\b\s+([\d,]+\.?\d*)\s+([\d,]+\.?\d*)\s+([\d,]+\.?\d*)",
-            r"\b[A-Z]+\s+([\d,]+\.?\d*)\s+([\d,]+\.?\d*)\s+([\d,]+\.?\d*)\s*(?=\n|$)",
-            r"([\d,]+\.?\d*)\s+([\d,]+\.?\d*)\s+([\d,]+\.?\d*)\s*\n.*?(?:ALL MDSE|TERMS)",
+        # Look for rates in multiple contexts
+        rate_contexts = [
+            # Context 1: Order type table
+            r"Order\s+Type\s+Gold\s+Platinum\s+Silver\s*\n.*?\b[A-Z]+\b\s+([\d,]+\.?\d*)\s+([\d,]+\.?\d*)\s+([\d,]+\.?\d*)",
+            
+            # Context 2: Simple three-number pattern near metals
+            r"(?:STOCK|MCH|SPC|SUPPLY)\s+([\d,]+\.?\d*)\s+([\d,]+\.?\d*)\s+([\d,]+\.?\d*)",
+            
+            # Context 3: Labeled rates
             r"Gold\s*[:\s]*([\d,]+\.?\d*)\s*Platinum\s*[:\s]*([\d,]+\.?\d*)\s*Silver\s*[:\s]*([\d,]+\.?\d*)",
-            r"(?:STOCK|MCH|SPC)\s+([\d,]+\.?\d*)\s+([\d,]+\.?\d*)\s+([\d,]+\.?\d*)",
+            
+            # Context 4: Table format with headers
+            r"Gold\s+Platinum\s+Silver\s*\n.*?([\d,]+\.?\d*)\s+([\d,]+\.?\d*)\s+([\d,]+\.?\d*)",
+            
+            # Context 5: Any three consecutive numbers in reasonable ranges
+            r"\b((?:1[5-9]|2[0-9]|30)\d{2})\s+((?:8|9|1[0-4])\d{2})\s+((?:1[5-9]|[2-4]\d)\.\d{2})\b"
         ]
 
-        for pattern in rate_patterns:
+        for pattern in rate_contexts:
             rate_match = re.search(pattern, rpo_text, re.IGNORECASE | re.MULTILINE)
             if rate_match:
-                rates["Gold Rate"] = rate_match.group(1).replace(',', '')
-                rates["Platinum Rate"] = rate_match.group(2).replace(',', '')
-                rates["Silver Rate"] = rate_match.group(3).replace(',', '')
-                break
+                try:
+                    gold_rate = rate_match.group(1).replace(',', '')
+                    platinum_rate = rate_match.group(2).replace(',', '')
+                    silver_rate = rate_match.group(3).replace(',', '')
+                    
+                    # Validate rates are reasonable
+                    if (1500 <= float(gold_rate) <= 3000 and 
+                        800 <= float(platinum_rate) <= 1500 and
+                        15 <= float(silver_rate) <= 50):
+                        
+                        rates["Gold Rate"] = gold_rate
+                        rates["Platinum Rate"] = platinum_rate  
+                        rates["Silver Rate"] = silver_rate
+                        break
+                except (ValueError, IndexError):
+                    continue
 
         return rates
 
     def extract_order_type_enhanced(self, rpo_text):
-        """ENHANCED: Better order type detection"""
+        """FIXED: Better order type detection"""
 
         # Extended order types list
         order_types = [
-            "STOCK", "MCH", "SPC", "ASSAY", "ASSET", "ASSETKM-AD", "CHARGEBACK",
+            "STOCK", "MCH", "SPC", "ASSAY", "ASSET", "SUPPLY", "CHARGEBACK",
             "CONFONLY", "CORRECT", "DNP", "DOTCOM", "DOTCOMB", "EXTEND",
             "FL-RECIEVE", "IGI", "MANUAL", "MC", "MCH-REV", "MST", "NEW-CLR",
             "PCM", "PKG", "PSAMPLE", "REP", "RMC", "RPR", "RTV", "SGI", "SHW",
-            "SLD", "SLDSPC", "SMG", "SMP", "SMPGEM", "SPO-BUILD", "SUPPLY", "TST"
+            "SLD", "SLDSPC", "SMG", "SMP", "SMPGEM", "SPO-BUILD", "TST"
         ]
 
         # Enhanced patterns with more context
         order_type_patterns = [
-            # Pattern 1: In metal rates table
+            # Pattern 1: Direct "Order Type" label
+            r"Order\s+Type[:\s]*(" + "|".join(order_types) + r")\b",
+            r"Type[:\s]*(" + "|".join(order_types) + r")\b",
+            
+            # Pattern 2: In metal rates table
             r"Order\s+Type\s+Gold\s+Platinum\s+Silver\s*\n.*?\b(" + "|".join(order_types) + r")\b",
-            # Pattern 2: With rates following
+            
+            # Pattern 3: With rates following
             r"\b(" + "|".join(order_types) + r")\s+[\d,]+\.?\d*\s+[\d,]+\.?\d*\s+[\d,]+\.?\d*",
-            # Pattern 3: Terms order type format
+            
+            # Pattern 4: Terms order type format
             r"Terms\s+Order\s+Type\s+.*?\n.*?\b(" + "|".join(order_types) + r")\b",
-            # Pattern 4: Standalone with context
-            r"(?:Order\s+Type|Type)[:\s]*(" + "|".join(order_types) + r")\b",
-            # Pattern 5: In table format
-            r"(?:Terms|Payment).*?(" + "|".join(order_types) + r")\b",
-            # Pattern 6: Near ALL MDSE
+            
+            # Pattern 5: Near ALL MDSE
             r"\b(" + "|".join(order_types) + r")\b.*?ALL\s+MDSE",
-            # Pattern 7: Fallback - any order type found
+            
+            # Pattern 6: Fallback - any order type found in first part of document
             r"\b(" + "|".join(order_types) + r")\b"
         ]
 
@@ -880,7 +920,7 @@ class HybridPDFOCRExtractor:
                 item["Labor PC"] = match.group(1)
                 break
 
-    def extract_item_technical_data_enhanced(self, item, item_text):
+    def extract_item_technical_data(self, item, item_text):
         """ENHANCED: Better technical data extraction with more patterns"""
 
         # CAST Fin Weight - Multiple patterns
@@ -986,12 +1026,8 @@ class HybridPDFOCRExtractor:
                 item["Diamond TW"] = match.group(1)
                 break
 
-    def extract_item_technical_data(self, item, item_text):
-        """Technical data extraction - ENHANCED VERSION"""
-        return self.extract_item_technical_data_enhanced(item, item_text)
-
     # ===============================
-    # COMPONENT EXTRACTION
+    # COMPONENT EXTRACTION - FIXED
     # ===============================
 
     def extract_components_state_machine(self, item_block, global_start_idx, all_lines, text_with_coords, debug):
@@ -1061,14 +1097,14 @@ class HybridPDFOCRExtractor:
             if re.search(r'\b[A-Z]{2}\d{4}[A-Z0-9]+\b.*\d+\.\d+.*(EA|PR)', line):
                 break
 
-            component = self.parse_component_line_fixed_for_your_format(line)
+            component = self.parse_component_line_enhanced_column_detection(line)
             if component and component.get("Component"):
                 components.append(component)
 
         return components
 
     def parse_component_line_enhanced_column_detection(self, line):
-        """ENHANCED: Better component parsing with proper column detection"""
+        """FIXED: Better component parsing with proper column detection"""
         component = {
             "Component": "",
             "Cost ($)": "",
@@ -1080,95 +1116,106 @@ class HybridPDFOCRExtractor:
         if not line or len(line) < 5:
             return None
 
-        # Skip headers and separators
+        # Skip obvious non-component lines
         skip_patterns = [
             r'^[\|\-\s]+$',  # Table separators
-            r'^(?:Component|Cost|Weight|Policy|Setting|Supplied|By)',  # Headers
-            r'^\d+\s*$'  # Just numbers
+            r'^(?:Component|Cost|Weight|Policy|Setting|Supplied|By)\s*$',  # Headers only
+            r'^\d+\s*$',  # Just numbers
+            r'^[A-Z\s]+$' if len(line) < 10 else None  # Short all-caps (likely headers)
         ]
 
         for pattern in skip_patterns:
-            if re.search(pattern, line, re.IGNORECASE):
+            if pattern and re.search(pattern, line, re.IGNORECASE):
                 return None
 
-        # ENHANCED: Component name extraction with priority order
+        # FIXED: Component name extraction with priority patterns
         component_patterns = [
-            # CS patterns - most common
-            r'\b(CS[0-9/\.-]+(?:-[A-Z0-9]+)*)', r'\b(CS[A-Z0-9\./\-]+)',
+            # High priority - specific formats
             r'\b(CS\d+/\d+(?:\.\d+)?(?:NV|OV|PS|HS|RDP)-[A-Z0-9]+)',
             r'\b(CS\d+(?:/\d+(?:\.\d+)?)?-[A-Z0-9]+-[A-Z0-9]+)',
-            r'\b(CS\d+(?:/\d+(?:\.\d+)?)?[A-Z]+-[A-Z0-9]+)',
-            # Other patterns
-            r'\b(THP-WH\d+-[A-Z]+)', r'\b(THP-[A-Z0-9\-]+)',
-            r'\b([0-9]{2}XX[0-9]{4}-[A-Z0-9]+)', r'\b(SSC[0-9]+[A-Z0-9]*)',
-            r'\b(PKG[0-9]+)', r'\b(TRC[0-9]+[A-Z0-9]*)',
-            r'\b(CHR[A-Z0-9]+W?-\d+[A-Z]?)', r'\b(OT-[A-Z0-9]+)',
-            r'\b(OT-CHR\d+-\d+)', r'\b(OT-[A-Z]+\d*)',
-            r'\b(R[0-9]{3}-[0-9]+[A-Z\-]*)', r'\b(CN\d{4}-[A-Z0-9]+-\d+)',
-            r'\b(CN[0-9]{4}-[A-Z0-9\-]+)', r'\b(MS\d{4}-[A-Z0-9]+)',
-            r'\b(MS[0-9]{4}-[A-Z0-9]+)', r'\b(A\d+/\.\d+)',
-            r'\b(A[0-9]+/\.[0-9]+)', r'\b(CHSBOXIML-\d+)',
-            r'\b(CHS[A-Z]+ML-\d+)', r'\b(LD[A-Z]*[0-9]+[A-Z]*[/\.][0-9\.]+)',
-            r'\b(LD[A-Z]*[0-9]+/[0-9\.]+)', r'\b(LD[A-Z0-9\.]+)',
-            r'\b(PKG\d+)', r'\b([A-Z]+[\d/.]+)', r'\b(H[0-9]+/[0-9\.]+)',
-            r'\b([A-Z]{1,4}\d{1,6}[A-Z0-9\./\-]*)',
-            r'\b([A-Z]+\d+[A-Z]*(?:[/\.-][A-Z0-9]+)*)',
-            r'\b([0-9]{4}-[A-Z]+-[A-Z]+)', r'\b([0-9]/[0-9\.]+-[A-Z]+-[A-Z]+)',
-            r'\b([0-9]/[0-9\.]+)', r'\b([0-9]+/[0-9\.]+[A-Z]*-[A-Z0-9]+)',
+            r'\b(THP-WH\d+-[A-Z]+)',
+            r'\b([0-9]{2}XX[0-9]{4}-[A-Z0-9]+)',
+            
+            # Medium priority - general patterns  
+            r'\b(CS[A-Z0-9\./\-]+)',
+            r'\b(SSC[0-9]+[A-Z0-9]*)',
+            r'\b(PKG[0-9]+)',
+            r'\b(CHR[A-Z0-9]+W?-\d+[A-Z]?)',
+            
+            # Lower priority - fallback patterns
+            r'\b([A-Z]{2,4}\d{2,6}[A-Z0-9\./\-]*)',
+            r'\b([A-Z]+\d+[A-Z]*(?:[/\.-][A-Z0-9]+)*)'
         ]
 
         for pattern in component_patterns:
             match = re.search(pattern, line)
             if match:
-                component["Component"] = match.group(1)
+                potential_component = match.group(1)
+                
+                # VALIDATION: Make sure it's not from wrong column
+                # Check if it's surrounded by supply policy text
+                before_text = line[:match.start()].strip()
+                after_text = line[match.end():].strip()
+                
+                # Skip if it's clearly in "Supplied by" column
+                if (re.search(r'(?:by|vendor|richline|customer)$', before_text, re.IGNORECASE) or
+                    re.search(r'^(?:vendor|richline|customer)', after_text, re.IGNORECASE)):
+                    continue
+                
+                component["Component"] = potential_component
                 break
 
-        # ENHANCED: Better cost/weight detection using position analysis
-        # Split line into potential columns
-        parts = re.split(r'\s{2,}', line)  # Split on 2+ spaces (column separator)
+        # FIXED: Better cost and weight extraction
+        # Look for patterns like "12.345 CT", "0.123 EA", "45.67 GR"
+        value_patterns = [
+            r'(\d+\.?\d*)\s*(CT|EA|GR|PC)',
+            r'\$(\d+\.?\d*)',  # Dollar amounts
+            r'(\d+\.?\d*)\s*(?=\s|$)'  # Standalone numbers
+        ]
 
-        # Find numeric values with units
-        numeric_values = []
-        for i, part in enumerate(parts):
-            # Look for patterns like "12.345 CT", "0.123 EA", "45.67 GR"
-            value_matches = re.findall(r'(\d+\.?\d*)\s*(CT|EA|GR|PC)', part, re.IGNORECASE)
-            for value, unit in value_matches:
-                numeric_values.append({
-                    'value': value,
-                    'unit': unit.upper(),
-                    'position': i,
-                    'text': part,
-                    'magnitude': float(value)
-                })
+        found_values = []
+        for pattern in value_patterns:
+            matches = re.finditer(pattern, line, re.IGNORECASE)
+            for match in matches:
+                if len(match.groups()) == 2:
+                    value, unit = match.groups()
+                    found_values.append({
+                        'value': value,
+                        'unit': unit.upper(),
+                        'position': match.start(),
+                        'magnitude': float(value)
+                    })
+                else:
+                    value = match.group(1)
+                    found_values.append({
+                        'value': value,
+                        'unit': '',
+                        'position': match.start(),
+                        'magnitude': float(value)
+                    })
 
-        # ENHANCED: Smart assignment based on context and magnitude
-        if numeric_values:
-            # Sort by position in line (left to right)
-            numeric_values.sort(key=lambda x: x['position'])
+        # Assign values based on magnitude and position
+        found_values.sort(key=lambda x: x['position'])  # Left to right
 
-            # Assign based on magnitude and context
-            for i, num_val in enumerate(numeric_values):
-                value_str = f"{num_val['value']} {num_val['unit']}"
+        for val in found_values:
+            value_str = f"{val['value']} {val['unit']}".strip()
+            
+            # Large values or dollar signs = cost
+            if val['magnitude'] > 5.0 or '$' in line:
+                if not component["Cost ($)"]:
+                    component["Cost ($)"] = value_str
+            # Small values with weight units = weight
+            elif val['unit'] in ['CT', 'GR'] or val['magnitude'] <= 5.0:
+                if not component["Tot. Weight"]:
+                    component["Tot. Weight"] = value_str
 
-                # First numeric value or large value (>5) = likely cost
-                if i == 0 or num_val['magnitude'] > 5.0:
-                    if not component["Cost ($)"]:  # Don't overwrite if already set
-                        component["Cost ($)"] = value_str
-
-                # Second numeric value or small value (<5) = likely weight
-                elif i == 1 or num_val['magnitude'] <= 5.0:
-                    if not component["Tot. Weight"]:  # Don't overwrite if already set
-                        component["Tot. Weight"] = value_str
-
-        # ENHANCED: Supply policy detection with more patterns
+        # Supply policy extraction
         policy_patterns = [
             (r'by\s+vendor', "By Vendor"),
-            (r'vendor\s+supply', "By Vendor"),
-            (r'send\s+to', "Send To"),
+            (r'vendor\s+supply', "By Vendor"), 
             (r'richline\s+supply', "Richline"),
-            (r'supply\s+by\s+richline', "Richline"),
             (r'customer\s+supply', "Customer"),
-            (r'drop\s+ship', "Drop Ship")
+            (r'send\s+to', "Send To")
         ]
 
         for pattern, policy in policy_patterns:
@@ -1177,10 +1224,6 @@ class HybridPDFOCRExtractor:
                 break
 
         return component if component["Component"] else None
-
-    def parse_component_line_fixed_for_your_format(self, line):
-        """ENHANCED: Component line parsing"""
-        return self.parse_component_line_enhanced_column_detection(line)
 
     # ===============================
     # RESULT FORMATTING
@@ -1246,8 +1289,7 @@ class HybridPDFOCRExtractor:
             # Create RPO-specific global data
             rpo_global = global_data.copy()
             rpo_global["PO #"] = rpo_number
-
-            # Process items for this RPO
+                        # Process items for this RPO
             processed_items = []
 
             for idx, (item_line_idx, item_number, item_line) in enumerate(rpo_items):
